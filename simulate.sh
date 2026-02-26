@@ -2,7 +2,7 @@
 # Simulation: 20 authors, 20 real photos, 20 players, full game
 set -e
 
-BASE="http://localhost:3001"
+BASE="${BASE:-http://localhost:3001}"
 ADMIN_PASS="${ADMIN_PASSWORD:-photoquiz}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TMPDIR=$(mktemp -d)
@@ -31,12 +31,23 @@ info "Verificando servidor..."
 curl -sf "$BASE/api/state" > /dev/null || fail "Servidor no responde en $BASE"
 log "Servidor OK"
 
-# ---- Admin Login ----
+# ---- Admin Login (uses python to safely encode password with special chars) ----
 info "Autenticando como admin..."
-LOGIN_RESP=$(curl -sf -X POST "$BASE/api/admin/login" \
-  -H "Content-Type: application/json" \
-  -d "{\"password\": \"$ADMIN_PASS\"}" 2>/dev/null) || fail "Error de login. ¿Contraseña correcta? (usa ADMIN_PASSWORD=xxx)"
-TOKEN=$(echo "$LOGIN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+export _SIM_BASE="$BASE" _SIM_PASS="$ADMIN_PASS"
+TOKEN=$(python3 -c "
+import json, urllib.request, sys, os
+url = os.environ['_SIM_BASE'] + '/api/admin/login'
+pwd = os.environ['_SIM_PASS']
+data = json.dumps({'password': pwd}).encode()
+req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+try:
+    resp = urllib.request.urlopen(req)
+    result = json.loads(resp.read())
+    print(result['token'])
+except Exception as e:
+    print(str(e), file=sys.stderr)
+    sys.exit(1)
+") || fail "Error de login. ¿Contraseña correcta? (usa ADMIN_PASSWORD=xxx)"
 [ -n "$TOKEN" ] || fail "No se obtuvo token de admin"
 log "Admin autenticado"
 
