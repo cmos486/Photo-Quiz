@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
 const Database = require('better-sqlite3');
 const multer = require('multer');
@@ -8,6 +9,10 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 
 const PORT = process.env.PORT || 3001;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'photoquiz';
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim())
+  : null; // null = allow all
 
 // --- Database ---
 const db = new Database(path.join(__dirname, 'data', 'quiz.db'));
@@ -218,11 +223,77 @@ const stmts = {
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*' },
+  cors: { origin: ALLOWED_ORIGINS || '*' },
   maxHttpBufferSize: 1e6, // 1MB max for socket messages (no images!)
 });
 
-app.use(express.json());
+// --- Security Headers ---
+app.use((req, res, next) => {
+  res.set({
+    'X-Frame-Options': 'SAMEORIGIN',
+    'X-Content-Type-Options': 'nosniff',
+    'X-XSS-Protection': '1; mode=block',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  });
+  next();
+});
+
+app.use(express.json({ limit: '1mb' }));
+
+// --- Rate Limiter (in-memory) ---
+const rateLimitStore = new Map();
+function rateLimit(key, maxRequests, windowMs) {
+  const now = Date.now();
+  const entry = rateLimitStore.get(key) || [];
+  const filtered = entry.filter(t => now - t < windowMs);
+  if (filtered.length >= maxRequests) return false;
+  filtered.push(now);
+  rateLimitStore.set(key, filtered);
+  return true;
+}
+// Cleanup every 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, times] of rateLimitStore) {
+    const filtered = times.filter(t => now - t < 3600000);
+    if (filtered.length === 0) rateLimitStore.delete(key);
+    else rateLimitStore.set(key, filtered);
+  }
+}, 600000);
+
+function rateLimitMiddleware(prefix, maxRequests, windowMs) {
+  return (req, res, next) => {
+    const ip = req.ip || req.connection.remoteAddress;
+    if (!rateLimit(`${prefix}:${ip}`, maxRequests, windowMs)) {
+      return res.status(429).json({ error: 'Demasiadas peticiones. Inténtalo más tarde.' });
+    }
+    next();
+  };
+}
+
+// --- Admin Auth ---
+const adminTokens = new Set();
+
+function generateAdminToken() {
+  const token = crypto.randomBytes(32).toString('hex');
+  adminTokens.add(token);
+  return token;
+}
+
+function requireAdmin(req, res, next) {
+  const token = req.headers['x-admin-token'];
+  if (!token || !adminTokens.has(token)) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  next();
+}
+
+// --- Input sanitization ---
+function sanitize(str, maxLen = 100) {
+  if (typeof str !== 'string') return '';
+  return str.trim().replace(/<[^>]*>/g, '').substring(0, maxLen);
+}
 
 // Serve frontend (in production nginx does this, but useful for local/Docker-only mode)
 app.use(express.static(path.join(__dirname, 'public')));
@@ -315,18 +386,36 @@ function broadcastState() {
 
 // --- API Routes ---
 
-// Get full state
+// Public: admin login
+app.post('/api/admin/login', rateLimitMiddleware('login', 5, 60000), (req, res) => {
+  const { password } = req.body;
+  if (!password || password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'Contraseña incorrecta' });
+  }
+  const token = generateAdminToken();
+  res.json({ ok: true, token });
+});
+
+// Public: verify token
+app.get('/api/admin/verify', (req, res) => {
+  const token = req.headers['x-admin-token'];
+  res.json({ valid: !!(token && adminTokens.has(token)) });
+});
+
+// Public: get state (players/TV need this without auth)
 app.get('/api/state', (req, res) => {
   const state = getFullState();
   res.json(state);
 });
 
+// ---- All routes below require admin auth ----
+
 // Upload photo
-app.post('/api/upload', upload.single('photo'), (req, res) => {
+app.post('/api/upload', requireAdmin, rateLimitMiddleware('upload', 20, 3600000), upload.single('photo'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No se envió foto' });
   const authorId = req.body.author_id;
   if (!authorId) {
-    fs.unlinkSync(req.file.path);
+    try { fs.unlinkSync(req.file.path); } catch {}
     return res.status(400).json({ error: 'Falta author_id' });
   }
   const maxOrder = db.prepare('SELECT MAX(display_order) as m FROM photos').get();
@@ -337,31 +426,31 @@ app.post('/api/upload', upload.single('photo'), (req, res) => {
 });
 
 // Delete photo
-app.delete('/api/photo/:id', (req, res) => {
+app.delete('/api/photo/:id', requireAdmin, (req, res) => {
   const photo = stmts.getPhotoById.get(req.params.id);
   if (!photo) return res.status(404).json({ error: 'Foto no encontrada' });
   const filepath = path.join(__dirname, 'photos', photo.filename);
   stmts.deletePhoto.run(req.params.id);
-  if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
+  try { if (fs.existsSync(filepath)) fs.unlinkSync(filepath); } catch {}
   broadcastState();
   res.json({ ok: true });
 });
 
 // Create author
-app.post('/api/authors', (req, res) => {
-  const { name } = req.body;
-  if (!name || !name.trim()) return res.status(400).json({ error: 'Falta nombre' });
-  const result = stmts.addAuthor.run(name.trim());
+app.post('/api/authors', requireAdmin, (req, res) => {
+  const name = sanitize(req.body.name, 50);
+  if (!name) return res.status(400).json({ error: 'Falta nombre' });
+  const result = stmts.addAuthor.run(name);
   broadcastState();
-  res.json({ id: result.lastInsertRowid, name: name.trim() });
+  res.json({ id: result.lastInsertRowid, name });
 });
 
 // Delete author (cascade deletes photos)
-app.delete('/api/authors/:id', (req, res) => {
+app.delete('/api/authors/:id', requireAdmin, (req, res) => {
   const photos = stmts.getPhotosByAuthor.all(req.params.id);
   for (const photo of photos) {
     const filepath = path.join(__dirname, 'photos', photo.filename);
-    if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
+    try { if (fs.existsSync(filepath)) fs.unlinkSync(filepath); } catch {}
   }
   stmts.deleteAuthor.run(req.params.id);
   broadcastState();
@@ -369,7 +458,7 @@ app.delete('/api/authors/:id', (req, res) => {
 });
 
 // Start game
-app.post('/api/game/start', (req, res) => {
+app.post('/api/game/start', requireAdmin, (req, res) => {
   const photos = stmts.getPhotos.all();
   if (photos.length === 0) return res.status(400).json({ error: 'No hay fotos' });
 
@@ -397,7 +486,7 @@ app.post('/api/game/start', (req, res) => {
 });
 
 // Reveal author
-app.post('/api/game/reveal', (req, res) => {
+app.post('/api/game/reveal', requireAdmin, (req, res) => {
   const session = stmts.getSession.get();
   if (session.state !== 'playing') return res.status(400).json({ error: 'No está en juego' });
 
@@ -447,7 +536,7 @@ app.post('/api/game/reveal', (req, res) => {
 });
 
 // Next photo
-app.post('/api/game/next', (req, res) => {
+app.post('/api/game/next', requireAdmin, (req, res) => {
   const session = stmts.getSession.get();
   const photos = stmts.getPhotos.all();
   const nextIndex = session.current_photo_index + 1;
@@ -463,8 +552,7 @@ app.post('/api/game/next', (req, res) => {
 });
 
 // Finish game
-app.post('/api/game/finish', (req, res) => {
-  // Archive game before finishing
+app.post('/api/game/finish', requireAdmin, (req, res) => {
   archiveGame();
   stmts.updateState.run('finished');
   const ranking = stmts.getPlayers.all();
@@ -474,8 +562,7 @@ app.post('/api/game/finish', (req, res) => {
 });
 
 // Reset game
-app.post('/api/game/reset', (req, res) => {
-  // Archive game before resetting (if it was played)
+app.post('/api/game/reset', requireAdmin, (req, res) => {
   archiveGame();
   const resetAll = db.transaction(() => {
     stmts.resetSession.run('lobby');
@@ -488,8 +575,8 @@ app.post('/api/game/reset', (req, res) => {
 });
 
 // Update game URL
-app.post('/api/game/url', (req, res) => {
-  const { url } = req.body;
+app.post('/api/game/url', requireAdmin, (req, res) => {
+  const url = sanitize(req.body.url, 500);
   if (url === undefined) return res.status(400).json({ error: 'Falta url' });
   stmts.updateGameUrl.run(url);
   broadcastState();
@@ -497,7 +584,7 @@ app.post('/api/game/url', (req, res) => {
 });
 
 // --- Admin: Purge all data ---
-app.post('/api/admin/purge', (req, res) => {
+app.post('/api/admin/purge', requireAdmin, (req, res) => {
   const includeHistory = req.body && req.body.includeHistory === true;
   purgeAllData(includeHistory);
   connectedPlayers.clear();
@@ -506,24 +593,24 @@ app.post('/api/admin/purge', (req, res) => {
 });
 
 // --- Admin: Get/Set auto-purge config ---
-app.get('/api/admin/auto-purge', (req, res) => {
+app.get('/api/admin/auto-purge', requireAdmin, (req, res) => {
   const session = db.prepare('SELECT auto_purge_days FROM session WHERE id = 1').get();
   res.json({ autoPurgeDays: session ? session.auto_purge_days : 0 });
 });
 
-app.post('/api/admin/auto-purge', (req, res) => {
+app.post('/api/admin/auto-purge', requireAdmin, (req, res) => {
   const { days } = req.body;
-  if (days === undefined || days < 0) return res.status(400).json({ error: 'Valor inválido' });
-  db.prepare('UPDATE session SET auto_purge_days = ? WHERE id = 1').run(days);
-  // Reset created_at to now when changing the setting so the countdown starts fresh
-  if (days > 0) {
+  const d = parseInt(days);
+  if (isNaN(d) || d < 0 || d > 365) return res.status(400).json({ error: 'Valor inválido (0-365)' });
+  db.prepare('UPDATE session SET auto_purge_days = ? WHERE id = 1').run(d);
+  if (d > 0) {
     db.prepare('UPDATE session SET created_at = CURRENT_TIMESTAMP WHERE id = 1').run();
   }
-  res.json({ ok: true, autoPurgeDays: days });
+  res.json({ ok: true, autoPurgeDays: d });
 });
 
 // --- Admin: Game history ---
-app.get('/api/admin/history', (req, res) => {
+app.get('/api/admin/history', requireAdmin, (req, res) => {
   const games = db.prepare('SELECT * FROM game_history ORDER BY finished_at DESC').all();
   const result = games.map(game => {
     const players = db.prepare(
@@ -534,14 +621,14 @@ app.get('/api/admin/history', (req, res) => {
   res.json({ games: result });
 });
 
-app.delete('/api/admin/history/:id', (req, res) => {
+app.delete('/api/admin/history/:id', requireAdmin, (req, res) => {
   const { id } = req.params;
   db.prepare('DELETE FROM game_history_players WHERE game_id = ?').run(id);
   db.prepare('DELETE FROM game_history WHERE id = ?').run(id);
   res.json({ ok: true });
 });
 
-app.delete('/api/admin/history', (req, res) => {
+app.delete('/api/admin/history', requireAdmin, (req, res) => {
   db.prepare('DELETE FROM game_history_players').run();
   db.prepare('DELETE FROM game_history').run();
   res.json({ ok: true });
@@ -572,9 +659,11 @@ io.on('connection', (socket) => {
 
   socket.on('join', ({ playerId, name }) => {
     if (!playerId || !name) return;
+    const safeName = sanitize(name, 30);
+    if (!safeName) return;
     socket.playerId = playerId;
     connectedPlayers.set(playerId, socket.id);
-    stmts.upsertPlayer.run(playerId, name.trim());
+    stmts.upsertPlayer.run(playerId, safeName);
 
     // Tell the player if they already voted for the current photo
     const session = stmts.getSession.get();
@@ -593,6 +682,8 @@ io.on('connection', (socket) => {
 
   socket.on('vote', ({ playerId, authorId }) => {
     if (!playerId || !authorId) return;
+    // Prevent vote spoofing: socket can only vote with its own playerId
+    if (socket.playerId && socket.playerId !== playerId) return;
 
     const session = stmts.getSession.get();
     if (session.state !== 'playing') return;
@@ -638,7 +729,14 @@ setInterval(() => {
   io.emit('players_online', { online: [...connectedPlayers.keys()] });
 }, 5000);
 
+// --- Error handler (no stack traces in production) ---
+app.use((err, req, res, _next) => {
+  console.error('[Error]', err.message);
+  res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Error interno' : err.message });
+});
+
 // --- Start ---
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Photo Quiz server running on port ${PORT}`);
+  console.log(`Admin password: ${ADMIN_PASSWORD === 'photoquiz' ? 'DEFAULT (photoquiz) — change ADMIN_PASSWORD env var!' : 'custom (set via env)'}`);
 });

@@ -3,6 +3,7 @@
 set -e
 
 BASE="http://localhost:3001"
+ADMIN_PASS="${ADMIN_PASSWORD:-photoquiz}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR; kill $PLAYER_PID 2>/dev/null; exec 3>&- 2>/dev/null" EXIT
@@ -30,6 +31,20 @@ info "Verificando servidor..."
 curl -sf "$BASE/api/state" > /dev/null || fail "Servidor no responde en $BASE"
 log "Servidor OK"
 
+# ---- Admin Login ----
+info "Autenticando como admin..."
+LOGIN_RESP=$(curl -sf -X POST "$BASE/api/admin/login" \
+  -H "Content-Type: application/json" \
+  -d "{\"password\": \"$ADMIN_PASS\"}" 2>/dev/null) || fail "Error de login. ¿Contraseña correcta? (usa ADMIN_PASSWORD=xxx)"
+TOKEN=$(echo "$LOGIN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+[ -n "$TOKEN" ] || fail "No se obtuvo token de admin"
+log "Admin autenticado"
+
+# Helper: admin curl (adds auth header)
+acurl() {
+  curl -sf -H "X-Admin-Token: $TOKEN" "$@"
+}
+
 echo ""
 echo "============================================="
 echo "  SIMULACIÓN: 20 autores, 20 fotos REALES, 20 jugadores"
@@ -38,7 +53,7 @@ echo ""
 
 # ---- Clean ----
 info "Limpiando datos anteriores..."
-curl -sf -X POST "$BASE/api/admin/purge" \
+acurl -X POST "$BASE/api/admin/purge" \
   -H "Content-Type: application/json" \
   -d '{"includeHistory": false}' > /dev/null
 log "Datos limpiados"
@@ -47,7 +62,7 @@ log "Datos limpiados"
 info "Creando 20 autores..."
 declare -a AUTHOR_IDS
 for i in "${!AUTHORS[@]}"; do
-  RESP=$(curl -sf -X POST "$BASE/api/authors" \
+  RESP=$(acurl -X POST "$BASE/api/authors" \
     -H "Content-Type: application/json" \
     -d "{\"name\": \"${AUTHORS[$i]}\"}")
   AID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
@@ -80,7 +95,7 @@ for i in "${!AUTHORS[@]}"; do
   fi
 
   # Upload to server
-  curl -sf -X POST "$BASE/api/upload" \
+  acurl -X POST "$BASE/api/upload" \
     -F "photo=@$IMGFILE" \
     -F "author_id=${AUTHOR_IDS[$i]}" > /dev/null
 done
@@ -128,7 +143,7 @@ log "$NUM_PLAYERS jugadores registrados en BD"
 # ---- Start game ----
 echo ""
 info "========== INICIANDO JUEGO =========="
-curl -sf -X POST "$BASE/api/game/start" > /dev/null
+acurl -X POST "$BASE/api/game/start" > /dev/null
 log "Juego iniciado"
 sleep 1
 
@@ -154,14 +169,14 @@ for PHOTO_NUM in $(seq 1 20); do
   log "Votos recibidos: $VOTERS/20"
 
   # Reveal
-  REVEAL=$(curl -sf -X POST "$BASE/api/game/reveal")
+  REVEAL=$(acurl -X POST "$BASE/api/game/reveal")
   AUTHOR=$(echo "$REVEAL" | python3 -c "import sys,json; print(json.load(sys.stdin).get('authorName','?'))")
   log "Autor revelado: $AUTHOR"
   sleep 1
 
   # Next or last
   if [ "$PHOTO_NUM" -lt 20 ]; then
-    curl -sf -X POST "$BASE/api/game/next" > /dev/null
+    acurl -X POST "$BASE/api/game/next" > /dev/null
     log "Siguiente foto"
     sleep 1
   fi
@@ -170,7 +185,7 @@ done
 # ---- Finish ----
 echo ""
 info "========== TERMINANDO JUEGO =========="
-curl -sf -X POST "$BASE/api/game/finish" > /dev/null
+acurl -X POST "$BASE/api/game/finish" > /dev/null
 log "Juego terminado"
 
 # ---- Final ranking ----
@@ -192,7 +207,7 @@ for i, p in enumerate(players):
 # ---- Verify history ----
 echo ""
 info "Verificando historial..."
-HISTORY=$(curl -sf "$BASE/api/admin/history")
+HISTORY=$(acurl "$BASE/api/admin/history")
 echo "$HISTORY" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)

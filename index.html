@@ -6,8 +6,8 @@
   <title>Photo Quiz</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.js" integrity="sha384-VT1EeewTCEXgndcPMQ0PzV+uVFYjxFIjmAA7s5gcMX9t4Dt5TD+OVQIn7NJWIXn7" crossorigin="anonymous"></script>
   <style>
     [x-cloak] { display: none !important; }
     @keyframes fadeInUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
@@ -34,7 +34,7 @@
           <button @click="view = 'tv'" class="bg-gray-900 text-white font-bold py-4 px-8 rounded-xl text-xl hover:bg-gray-800 transition shadow-lg">
             📺 Pantalla TV
           </button>
-          <button @click="view = 'admin'" class="bg-amber-500 text-white font-bold py-4 px-8 rounded-xl text-xl hover:bg-amber-600 transition shadow-lg">
+          <button @click="selectAdmin()" class="bg-amber-500 text-white font-bold py-4 px-8 rounded-xl text-xl hover:bg-amber-600 transition shadow-lg">
             ⚙️ Admin
           </button>
         </div>
@@ -154,20 +154,53 @@
     </div>
   </template>
 
+  <!-- ==================== ADMIN LOGIN ==================== -->
+  <template x-if="view === 'admin' && !adminAuthenticated">
+    <div class="flex items-center justify-center min-h-screen bg-gradient-to-br from-amber-500 to-orange-600">
+      <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm mx-4">
+        <div class="text-center mb-6">
+          <div class="text-5xl mb-2">🔐</div>
+          <h1 class="text-2xl font-bold text-gray-800">Admin</h1>
+          <p class="text-gray-500 text-sm mt-1">Introduce la contraseña de administrador</p>
+        </div>
+        <div>
+          <input type="password" x-model="adminPassword" placeholder="Contraseña"
+                 class="w-full border-2 rounded-xl px-4 py-3 text-center text-lg mb-3 focus:border-amber-500 focus:outline-none"
+                 :class="adminLoginError ? 'border-red-400' : 'border-gray-300'"
+                 @keydown.enter="adminLogin()">
+          <p x-show="adminLoginError" class="text-red-500 text-sm text-center mb-3" x-text="adminLoginError"></p>
+          <button @click="adminLogin()" :disabled="!adminPassword.trim() || adminLoggingIn"
+                  class="w-full bg-amber-500 text-white font-bold py-3 rounded-xl text-lg hover:bg-amber-600 disabled:opacity-50 transition">
+            <span x-show="!adminLoggingIn">Entrar</span>
+            <span x-show="adminLoggingIn">Verificando...</span>
+          </button>
+        </div>
+        <button @click="view = 'select'" class="mt-4 text-sm text-gray-400 hover:text-gray-600 w-full text-center">
+          ← Volver
+        </button>
+      </div>
+    </div>
+  </template>
+
   <!-- ==================== ADMIN VIEW ==================== -->
-  <template x-if="view === 'admin'">
+  <template x-if="view === 'admin' && adminAuthenticated">
     <div class="max-w-4xl mx-auto p-4 pb-20">
       <!-- Header -->
       <div class="flex items-center justify-between mb-4">
         <h1 class="text-2xl font-bold text-gray-800">⚙️ Photo Quiz Admin</h1>
-        <span class="px-3 py-1 rounded-full text-sm font-medium"
-              :class="{
-                'bg-gray-200 text-gray-700': gameState === 'lobby',
-                'bg-green-100 text-green-700': gameState === 'playing',
-                'bg-amber-100 text-amber-700': gameState === 'revealed',
-                'bg-blue-100 text-blue-700': gameState === 'finished'
-              }"
-              x-text="'Estado: ' + gameState"></span>
+        <div class="flex items-center gap-2">
+          <span class="px-3 py-1 rounded-full text-sm font-medium"
+                :class="{
+                  'bg-gray-200 text-gray-700': gameState === 'lobby',
+                  'bg-green-100 text-green-700': gameState === 'playing',
+                  'bg-amber-100 text-amber-700': gameState === 'revealed',
+                  'bg-blue-100 text-blue-700': gameState === 'finished'
+                }"
+                x-text="'Estado: ' + gameState"></span>
+          <button @click="adminLogout()" class="text-gray-400 hover:text-red-500 transition text-sm" title="Cerrar sesión admin">
+            🔓
+          </button>
+        </div>
       </div>
 
       <!-- Tab Navigation -->
@@ -575,6 +608,13 @@
         revealedAuthorName: '',
         gameUrl: '',
 
+        // Admin auth
+        adminToken: sessionStorage.getItem('pq_adminToken') || '',
+        adminAuthenticated: false,
+        adminPassword: '',
+        adminLoginError: '',
+        adminLoggingIn: false,
+
         // Admin
         adminTab: 'game',
         newAuthorName: '',
@@ -680,6 +720,11 @@
           // Generate QR for TV view — schedule render whenever relevant state changes
           this.$watch('gameUrl', () => this.scheduleQR());
           this.$watch('gameState', () => this.scheduleQR());
+
+          // If admin view with saved token, verify it
+          if (this.view === 'admin' && this.adminToken) {
+            this.verifyAdminToken();
+          }
         },
 
         async fetchState() {
@@ -706,13 +751,13 @@
               this.revealedAuthorName = author ? author.name : '';
             }
 
-            // Load admin settings
-            if (this.view === 'admin') {
-              fetch('/api/admin/auto-purge').then(r => r.json()).then(d => {
-                this.autoPurgeDays = d.autoPurgeDays || 0;
+            // Load admin settings (needs auth)
+            if (this.view === 'admin' && this.adminAuthenticated && this.adminToken) {
+              this.adminFetch('/api/admin/auto-purge').then(r => r && r.json()).then(d => {
+                if (d) this.autoPurgeDays = d.autoPurgeDays || 0;
               }).catch(() => {});
-              fetch('/api/admin/history').then(r => r.json()).then(d => {
-                this.gameHistory = d.games || [];
+              this.adminFetch('/api/admin/history').then(r => r && r.json()).then(d => {
+                if (d) this.gameHistory = d.games || [];
               }).catch(() => {});
             }
 
@@ -769,18 +814,20 @@
         // --- Admin actions ---
         async addAuthor() {
           if (!this.newAuthorName.trim()) return;
-          await fetch('/api/authors', {
+          const res = await this.adminFetch('/api/authors', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: this.newAuthorName.trim() }),
           });
+          if (!res) return;
           this.newAuthorName = '';
           this.fetchState();
         },
 
         async deleteAuthor(id) {
           if (!confirm('¿Eliminar este autor y todas sus fotos?')) return;
-          await fetch(`/api/authors/${id}`, { method: 'DELETE' });
+          const res = await this.adminFetch(`/api/authors/${id}`, { method: 'DELETE' });
+          if (!res) return;
           this.fetchState();
         },
 
@@ -790,14 +837,16 @@
             const formData = new FormData();
             formData.append('photo', file);
             formData.append('author_id', authorId);
-            await fetch('/api/upload', { method: 'POST', body: formData });
+            const res = await this.adminFetch('/api/upload', { method: 'POST', body: formData });
+            if (!res) return;
           }
           event.target.value = '';
           this.fetchState();
         },
 
         async deletePhoto(id) {
-          await fetch(`/api/photo/${id}`, { method: 'DELETE' });
+          const res = await this.adminFetch(`/api/photo/${id}`, { method: 'DELETE' });
+          if (!res) return;
           this.fetchState();
         },
 
@@ -806,17 +855,19 @@
         },
 
         async saveGameUrl() {
-          await fetch('/api/game/url', {
+          const res = await this.adminFetch('/api/game/url', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url: this.gameUrlInput }),
           });
+          if (!res) return;
           this.gameUrl = this.gameUrlInput;
         },
 
         async gameAction(action) {
           try {
-            const res = await fetch(`/api/game/${action}`, { method: 'POST' });
+            const res = await this.adminFetch(`/api/game/${action}`, { method: 'POST' });
+            if (!res) return;
             if (!res.ok) {
               const err = await res.json();
               alert(err.error || 'Error');
@@ -830,42 +881,48 @@
         async purgeAll() {
           if (!confirm('⚠️ ¿BORRAR TODO? Se eliminarán todas las fotos, autores, jugadores, votos y puntuaciones. Esta acción NO se puede deshacer.')) return;
           if (!confirm('¿Estás COMPLETAMENTE seguro? Todo se perderá.')) return;
-          await fetch('/api/admin/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ includeHistory: false }) });
+          const res = await this.adminFetch('/api/admin/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ includeHistory: false }) });
+          if (!res) return;
           this.fetchState();
         },
 
         async purgeAllWithHistory() {
           if (!confirm('⚠️ ¿BORRAR TODO INCLUYENDO EL HISTORIAL? Se perderá absolutamente todo. Esta acción NO se puede deshacer.')) return;
           if (!confirm('¿Estás COMPLETAMENTE seguro? Todo incluido el historial se perderá.')) return;
-          await fetch('/api/admin/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ includeHistory: true }) });
+          const res = await this.adminFetch('/api/admin/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ includeHistory: true }) });
+          if (!res) return;
           this.gameHistory = [];
           this.fetchState();
         },
 
         async saveAutoPurge(days) {
-          this.autoPurgeDays = days;
-          await fetch('/api/admin/auto-purge', {
+          const res = await this.adminFetch('/api/admin/auto-purge', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ days }),
           });
+          if (!res) return;
+          this.autoPurgeDays = days;
         },
 
         async loadHistory() {
-          const res = await fetch('/api/admin/history');
+          const res = await this.adminFetch('/api/admin/history');
+          if (!res) return;
           const data = await res.json();
           this.gameHistory = data.games || [];
         },
 
         async deleteHistoryEntry(id) {
           if (!confirm('¿Eliminar esta partida del historial?')) return;
-          await fetch(`/api/admin/history/${id}`, { method: 'DELETE' });
+          const res = await this.adminFetch(`/api/admin/history/${id}`, { method: 'DELETE' });
+          if (!res) return;
           this.loadHistory();
         },
 
         async clearAllHistory() {
           if (!confirm('¿Borrar TODO el historial de partidas?')) return;
-          await fetch('/api/admin/history', { method: 'DELETE' });
+          const res = await this.adminFetch('/api/admin/history', { method: 'DELETE' });
+          if (!res) return;
           this.gameHistory = [];
         },
 
@@ -873,6 +930,80 @@
           if (!dateStr) return '';
           const d = new Date(dateStr + 'Z');
           return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        },
+
+        // --- Admin auth ---
+        selectAdmin() {
+          this.view = 'admin';
+          if (this.adminToken) {
+            this.verifyAdminToken();
+          }
+        },
+
+        async verifyAdminToken() {
+          try {
+            const res = await fetch('/api/admin/verify', {
+              headers: { 'X-Admin-Token': this.adminToken },
+            });
+            const data = await res.json();
+            if (data.valid) {
+              this.adminAuthenticated = true;
+              this.fetchState();
+            } else {
+              this.adminToken = '';
+              sessionStorage.removeItem('pq_adminToken');
+            }
+          } catch {
+            this.adminToken = '';
+            sessionStorage.removeItem('pq_adminToken');
+          }
+        },
+
+        async adminLogin() {
+          if (!this.adminPassword.trim()) return;
+          this.adminLoggingIn = true;
+          this.adminLoginError = '';
+          try {
+            const res = await fetch('/api/admin/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ password: this.adminPassword }),
+            });
+            const data = await res.json();
+            if (res.ok && data.token) {
+              this.adminToken = data.token;
+              sessionStorage.setItem('pq_adminToken', data.token);
+              this.adminAuthenticated = true;
+              this.adminPassword = '';
+              this.fetchState();
+            } else {
+              this.adminLoginError = data.error || 'Error de autenticación';
+            }
+          } catch {
+            this.adminLoginError = 'Error de conexión';
+          }
+          this.adminLoggingIn = false;
+        },
+
+        adminLogout() {
+          this.adminToken = '';
+          this.adminAuthenticated = false;
+          sessionStorage.removeItem('pq_adminToken');
+          this.view = 'select';
+        },
+
+        // Admin fetch helper: adds X-Admin-Token header, handles 401
+        async adminFetch(url, options = {}) {
+          const headers = { ...(options.headers || {}), 'X-Admin-Token': this.adminToken };
+          const res = await fetch(url, { ...options, headers });
+          if (res.status === 401) {
+            this.adminToken = '';
+            this.adminAuthenticated = false;
+            sessionStorage.removeItem('pq_adminToken');
+            this.adminLoginError = 'Sesión expirada. Inicia sesión de nuevo.';
+            return null;
+          }
+          return res;
         },
       };
     }

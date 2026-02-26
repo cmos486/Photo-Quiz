@@ -11,3 +11,4 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-photoquiz}
