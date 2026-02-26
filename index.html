@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Photo Quiz</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+    @keyframes confetti { 0% { transform: translateY(0) rotate(0deg); opacity: 1; } 100% { transform: translateY(-100px) rotate(720deg); opacity: 0; } }
+    .fade-in-up { animation: fadeInUp 0.6s ease-out; }
+    .pulse-anim { animation: pulse 0.5s ease-in-out; }
+    .bar-transition { transition: width 0.5s ease-out; }
+    .photo-reveal { animation: fadeInUp 0.8s ease-out; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen" x-data="app()" x-init="init()" x-cloak>
+
+  <!-- ==================== ROLE SELECTOR ==================== -->
+  <template x-if="view === 'select'">
+    <div class="flex items-center justify-center min-h-screen bg-gradient-to-br from-indigo-500 to-purple-700">
+      <div class="text-center p-8">
+        <h1 class="text-5xl font-bold text-white mb-2">📷 Photo Quiz</h1>
+        <p class="text-indigo-200 mb-10 text-lg">¿Quién hizo esta foto?</p>
+        <div class="grid gap-4 max-w-sm mx-auto">
+          <button @click="view = 'player'" class="bg-white text-indigo-700 font-bold py-4 px-8 rounded-xl text-xl hover:bg-indigo-50 transition shadow-lg">
+            🎮 Jugar
+          </button>
+          <button @click="view = 'tv'" class="bg-gray-900 text-white font-bold py-4 px-8 rounded-xl text-xl hover:bg-gray-800 transition shadow-lg">
+            📺 Pantalla TV
+          </button>
+          <button @click="view = 'admin'" class="bg-amber-500 text-white font-bold py-4 px-8 rounded-xl text-xl hover:bg-amber-600 transition shadow-lg">
+            ⚙️ Admin
+          </button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- ==================== TV VIEW ==================== -->
+  <template x-if="view === 'tv'">
+    <div class="min-h-screen bg-gray-950 text-white">
+
+      <!-- TV: Lobby -->
+      <div x-show="gameState === 'lobby'" class="flex flex-col items-center justify-center min-h-screen p-8" x-init="$watch('gameState', v => { if (v === 'lobby') $nextTick(() => renderQR()) })">
+          <h1 class="text-6xl font-bold mb-4">📷 Photo Quiz</h1>
+          <p class="text-gray-400 text-2xl mb-8">Esperando jugadores...</p>
+          <div class="bg-white p-6 rounded-2xl mb-8">
+            <canvas id="qr-canvas"></canvas>
+          </div>
+          <p class="text-gray-400 text-xl mb-8" x-text="gameUrl || 'URL no configurada'"></p>
+          <div class="flex flex-wrap gap-3 justify-center max-w-2xl">
+            <template x-for="p in players.filter(p => onlinePlayers.includes(p.id))" :key="p.id">
+              <div class="bg-gray-800 px-4 py-2 rounded-full text-lg flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-green-400"></span>
+                <span x-text="p.name"></span>
+              </div>
+            </template>
+          </div>
+          <p class="text-gray-500 mt-6 text-xl" x-text="players.filter(p => onlinePlayers.includes(p.id)).length + ' jugadores conectados'"></p>
+      </div>
+
+      <!-- TV: Playing -->
+      <template x-if="gameState === 'playing'">
+        <div class="flex flex-col min-h-screen">
+          <!-- Photo -->
+          <div class="flex-1 flex items-center justify-center p-4 bg-black relative">
+            <img :src="currentPhotoUrl" class="max-h-[70vh] max-w-full object-contain rounded-lg shadow-2xl" x-show="currentPhotoUrl">
+            <!-- Photo counter overlay -->
+            <div class="absolute top-4 right-6 text-gray-400 text-sm bg-black/60 px-3 py-1 rounded-full">
+              Foto <span x-text="currentPhotoIndex + 1"></span> / <span x-text="totalPhotos"></span>
+            </div>
+          </div>
+          <!-- Vote bars at bottom -->
+          <div class="bg-gray-900 px-6 py-4">
+            <div class="max-w-4xl mx-auto">
+              <div class="text-center text-sm text-gray-400 mb-3">
+                <span x-text="totalVoters"></span>/<span x-text="players.length"></span> votos recibidos
+              </div>
+              <div class="grid gap-2" :style="'grid-template-columns: repeat(' + Math.min(authors.length, 4) + ', 1fr)'">
+                <template x-for="a in authors" :key="a.id">
+                  <div>
+                    <div class="flex justify-between text-sm mb-1">
+                      <span x-text="a.name" class="truncate"></span>
+                      <span class="ml-2" x-text="(voteCounts[a.id] || 0)"></span>
+                    </div>
+                    <div class="bg-gray-800 rounded-full h-5 overflow-hidden">
+                      <div class="bg-indigo-500 h-full bar-transition rounded-full"
+                           :style="'width: ' + (totalVoters > 0 ? ((voteCounts[a.id] || 0) / totalVoters * 100) : 0) + '%'">
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- TV: Revealed -->
+      <template x-if="gameState === 'revealed'">
+        <div class="flex flex-col min-h-screen">
+          <!-- Photo with author reveal -->
+          <div class="flex-1 flex items-center justify-center p-4 bg-black relative">
+            <img :src="currentPhotoUrl" class="max-h-[55vh] max-w-full object-contain rounded-lg shadow-2xl">
+            <div class="absolute top-4 right-6 text-gray-400 text-sm bg-black/60 px-3 py-1 rounded-full">
+              Foto <span x-text="currentPhotoIndex + 1"></span> / <span x-text="totalPhotos"></span>
+            </div>
+            <div class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-gradient-to-r from-amber-500 to-orange-500 px-8 py-3 rounded-2xl photo-reveal shadow-2xl">
+              <div class="text-2xl font-bold text-center" x-text="'📸 ' + revealedAuthorName"></div>
+            </div>
+          </div>
+          <!-- Ranking at bottom -->
+          <div class="bg-gray-900 px-6 py-4">
+            <div class="max-w-4xl mx-auto">
+              <h3 class="text-center text-lg font-bold mb-3">Ranking</h3>
+              <div class="grid gap-2" :style="'grid-template-columns: repeat(' + Math.min(ranking.length, 5) + ', 1fr)'">
+                <template x-for="(p, i) in ranking" :key="p.id">
+                  <div class="flex items-center gap-2 bg-gray-800 px-3 py-2 rounded-lg"
+                       :class="i < 3 ? 'ring-2 ring-amber-400' : ''">
+                    <span class="text-lg font-bold w-7 text-center shrink-0" x-text="i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i+1)"></span>
+                    <span class="flex-1 truncate" x-text="p.name"></span>
+                    <span class="font-bold text-amber-400 shrink-0" x-text="p.score + ' pts'"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- TV: Finished -->
+      <template x-if="gameState === 'finished'">
+        <div class="flex flex-col items-center justify-center min-h-screen p-8">
+          <h1 class="text-5xl font-bold mb-8 fade-in-up">🏆 Resultados Finales</h1>
+          <div class="w-full max-w-lg space-y-4">
+            <template x-for="(p, i) in ranking" :key="p.id">
+              <div class="flex items-center gap-4 bg-gray-800 px-6 py-4 rounded-xl fade-in-up"
+                   :class="i === 0 ? 'ring-4 ring-amber-400 text-2xl' : i < 3 ? 'ring-2 ring-amber-600 text-xl' : 'text-lg'"
+                   :style="'animation-delay: ' + (i * 0.15) + 's'">
+                <span class="text-3xl w-12 text-center" x-text="i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i+1)"></span>
+                <span class="flex-1 font-bold" x-text="p.name"></span>
+                <span class="font-bold text-amber-400" x-text="p.score + ' pts'"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- ==================== ADMIN VIEW ==================== -->
+  <template x-if="view === 'admin'">
+    <div class="max-w-4xl mx-auto p-4 pb-20">
+      <!-- Header -->
+      <div class="flex items-center justify-between mb-4">
+        <h1 class="text-2xl font-bold text-gray-800">⚙️ Photo Quiz Admin</h1>
+        <span class="px-3 py-1 rounded-full text-sm font-medium"
+              :class="{
+                'bg-gray-200 text-gray-700': gameState === 'lobby',
+                'bg-green-100 text-green-700': gameState === 'playing',
+                'bg-amber-100 text-amber-700': gameState === 'revealed',
+                'bg-blue-100 text-blue-700': gameState === 'finished'
+              }"
+              x-text="'Estado: ' + gameState"></span>
+      </div>
+
+      <!-- Tab Navigation -->
+      <div class="flex border-b border-gray-200 mb-6">
+        <button @click="adminTab = 'game'"
+                class="px-5 py-3 text-sm font-medium border-b-2 transition -mb-px"
+                :class="adminTab === 'game' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
+          🎮 Juego
+        </button>
+        <button @click="adminTab = 'stats'; loadHistory()"
+                class="px-5 py-3 text-sm font-medium border-b-2 transition -mb-px"
+                :class="adminTab === 'stats' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
+          📊 Estadísticas
+        </button>
+        <button @click="adminTab = 'settings'"
+                class="px-5 py-3 text-sm font-medium border-b-2 transition -mb-px"
+                :class="adminTab === 'settings' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
+          ⚙️ Ajustes
+        </button>
+      </div>
+
+      <!-- ===== TAB: JUEGO ===== -->
+      <div x-show="adminTab === 'game'">
+
+        <!-- Authors & Photos -->
+        <div class="bg-white rounded-xl shadow p-4 mb-4">
+          <h2 class="font-bold text-gray-700 mb-3">Autores y Fotos</h2>
+          <div class="flex gap-2 mb-4">
+            <input type="text" x-model="newAuthorName" placeholder="Nombre del autor"
+                   class="flex-1 border rounded-lg px-3 py-2 text-sm" @keydown.enter="addAuthor()">
+            <button @click="addAuthor()" class="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700">
+              + Autor
+            </button>
+          </div>
+          <div class="space-y-4">
+            <template x-for="author in authors" :key="author.id">
+              <div class="border rounded-lg p-3">
+                <div class="flex items-center justify-between mb-2">
+                  <h3 class="font-bold text-gray-800" x-text="author.name"></h3>
+                  <div class="flex gap-2 items-center">
+                    <span class="text-xs text-gray-400" x-text="getAuthorPhotos(author.id).length + ' fotos'"></span>
+                    <button @click="deleteAuthor(author.id)" class="text-red-500 hover:text-red-700 text-sm">✕ Eliminar</button>
+                  </div>
+                </div>
+                <div class="mb-2">
+                  <input type="file" multiple accept="image/*" @change="uploadPhotos($event, author.id)"
+                         class="text-sm text-gray-500 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <template x-for="photo in getAuthorPhotos(author.id)" :key="photo.id">
+                    <div class="relative group">
+                      <img :src="photo.url" class="w-20 h-20 object-cover rounded-lg">
+                      <button @click="deletePhoto(photo.id)"
+                              class="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                        ✕
+                      </button>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Connected Players -->
+        <div class="bg-white rounded-xl shadow p-4 mb-4">
+          <h2 class="font-bold text-gray-700 mb-3">
+            Jugadores
+            <span class="text-green-600 font-normal text-sm" x-text="onlinePlayers.length + ' online'"></span>
+          </h2>
+          <div class="flex flex-wrap gap-2">
+            <template x-for="p in players.filter(p => onlinePlayers.includes(p.id))" :key="p.id">
+              <div class="flex items-center gap-2 bg-green-50 px-3 py-1 rounded-full text-sm border border-green-200">
+                <span class="w-2 h-2 rounded-full bg-green-400"></span>
+                <span x-text="p.name"></span>
+                <span class="text-gray-400" x-text="p.score + 'pts'"></span>
+              </div>
+            </template>
+            <div x-show="onlinePlayers.length === 0" class="text-gray-400 text-sm">Ningún jugador conectado</div>
+          </div>
+        </div>
+
+        <!-- Game Controls -->
+        <div class="bg-white rounded-xl shadow p-4 mb-4">
+          <h2 class="font-bold text-gray-700 mb-3">Control del Juego</h2>
+          <div class="flex flex-wrap gap-2">
+            <button @click="gameAction('start')" x-show="gameState === 'lobby'"
+                    :disabled="photos.length === 0"
+                    class="bg-green-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed">
+              ▶ Empezar Juego
+            </button>
+            <button @click="gameAction('reveal')" x-show="gameState === 'playing'"
+                    class="bg-amber-500 text-white px-6 py-2 rounded-lg font-medium hover:bg-amber-600">
+              👁 Revelar Autor
+            </button>
+            <button @click="gameAction('next')" x-show="gameState === 'revealed' && currentPhotoIndex < totalPhotos - 1"
+                    class="bg-indigo-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-indigo-700">
+              ⏭ Siguiente Foto
+            </button>
+            <button @click="gameAction('finish')" x-show="gameState === 'revealed' && currentPhotoIndex >= totalPhotos - 1"
+                    class="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700">
+              🏁 Terminar Juego
+            </button>
+            <button @click="gameAction('finish')" x-show="gameState === 'playing' || gameState === 'revealed'"
+                    class="bg-gray-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-600">
+              Terminar Anticipado
+            </button>
+            <button @click="if(confirm('¿Resetear el juego? Se perderán puntuaciones y votos.')) gameAction('reset')"
+                    x-show="gameState !== 'lobby'"
+                    class="bg-red-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-600">
+              🔄 Resetear
+            </button>
+          </div>
+          <div x-show="gameState === 'playing' || gameState === 'revealed'" class="mt-3 text-sm text-gray-500">
+            Foto <span x-text="currentPhotoIndex + 1"></span> de <span x-text="totalPhotos"></span>
+            — <span x-text="totalVoters"></span>/<span x-text="players.length"></span> votos recibidos
+          </div>
+        </div>
+
+        <!-- Ranking during game -->
+        <div class="bg-white rounded-xl shadow p-4" x-show="gameState !== 'lobby'">
+          <h2 class="font-bold text-gray-700 mb-3">Ranking</h2>
+          <div class="space-y-1">
+            <template x-for="(p, i) in ranking" :key="p.id">
+              <div class="flex items-center gap-2 py-1 text-sm">
+                <span class="w-6 text-center font-bold" x-text="i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i+1)"></span>
+                <span class="flex-1" x-text="p.name"></span>
+                <span class="font-bold text-amber-600" x-text="p.score + ' pts'"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ===== TAB: ESTADÍSTICAS ===== -->
+      <div x-show="adminTab === 'stats'">
+
+        <!-- No history -->
+        <div x-show="gameHistory.length === 0" class="bg-white rounded-xl shadow p-8 text-center">
+          <div class="text-5xl mb-4">📊</div>
+          <p class="text-gray-500">No hay partidas registradas</p>
+          <p class="text-gray-400 text-sm mt-1">El historial se guarda automáticamente al terminar o resetear una partida</p>
+        </div>
+
+        <!-- History header -->
+        <div x-show="gameHistory.length > 0" class="flex items-center justify-between mb-4">
+          <h2 class="font-bold text-gray-700 text-lg">
+            Historial de Partidas
+            <span class="text-gray-400 font-normal text-sm" x-text="'(' + gameHistory.length + ')'"></span>
+          </h2>
+          <button @click="clearAllHistory()"
+                  class="text-red-500 text-sm hover:text-red-700 transition">
+            🗑️ Borrar historial
+          </button>
+        </div>
+
+        <!-- History entries -->
+        <div class="space-y-4" x-show="gameHistory.length > 0">
+          <template x-for="game in gameHistory" :key="game.id">
+            <div class="bg-white rounded-xl shadow p-4">
+              <div class="flex items-center justify-between mb-3">
+                <div>
+                  <span class="font-bold text-gray-800" x-text="'Partida #' + game.id"></span>
+                  <span class="text-sm text-gray-400 ml-2" x-text="formatDate(game.finished_at)"></span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full" x-text="game.total_players + ' jugadores'"></span>
+                  <span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full" x-text="game.total_photos + ' fotos'"></span>
+                  <button @click="deleteHistoryEntry(game.id)" class="text-red-400 hover:text-red-600 text-sm">✕</button>
+                </div>
+              </div>
+              <div class="space-y-1">
+                <template x-for="(p, i) in game.players" :key="p.id">
+                  <div class="flex items-center gap-2 py-1.5 text-sm" :class="i < 3 ? 'font-medium' : ''">
+                    <span class="w-7 text-center" x-text="i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i+1)"></span>
+                    <span class="flex-1 text-gray-700" x-text="p.player_name"></span>
+                    <span class="text-green-600 text-xs bg-green-50 px-2 py-0.5 rounded-full" x-text="p.correct_votes + '/' + p.total_votes + ' aciertos'"></span>
+                    <span class="font-bold text-amber-600 w-16 text-right" x-text="p.score + ' pts'"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+
+      </div>
+
+      <!-- ===== TAB: AJUSTES ===== -->
+      <div x-show="adminTab === 'settings'">
+
+        <!-- Game URL -->
+        <div class="bg-white rounded-xl shadow p-4 mb-4">
+          <h2 class="font-bold text-gray-700 mb-2">URL Pública del Juego</h2>
+          <p class="text-xs text-gray-400 mb-3">La URL que aparecerá en el QR de la pantalla TV. Debe ser accesible desde los móviles de los jugadores.</p>
+          <div class="flex gap-2">
+            <input type="text" x-model="gameUrlInput" placeholder="https://quiz.tudominio.com"
+                   class="flex-1 border rounded-lg px-3 py-2 text-sm" @keydown.enter="saveGameUrl()">
+            <button @click="saveGameUrl()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">
+              Guardar
+            </button>
+          </div>
+        </div>
+
+        <!-- Auto-purge -->
+        <div class="bg-white rounded-xl shadow p-4 mb-4">
+          <h2 class="font-bold text-gray-700 mb-2">Purga automática</h2>
+          <p class="text-xs text-gray-400 mb-3">El servidor comprueba periódicamente (cada hora) si los datos han superado la antigüedad configurada. Si se cumple, se borran automáticamente (el historial se conserva).</p>
+          <div class="flex flex-wrap gap-2">
+            <template x-for="opt in [
+              { days: 0, label: 'Desactivada' },
+              { days: 1, label: '1 día' },
+              { days: 7, label: '7 días' },
+              { days: 14, label: '14 días' },
+              { days: 30, label: '30 días' },
+              { days: 90, label: '90 días' }
+            ]" :key="opt.days">
+              <button @click="saveAutoPurge(opt.days)"
+                      class="px-3 py-1.5 rounded-lg text-sm border transition"
+                      :class="autoPurgeDays === opt.days
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-white text-gray-700 border-gray-300 hover:border-indigo-400'">
+                <span x-text="opt.label"></span>
+              </button>
+            </template>
+          </div>
+          <p class="text-xs text-gray-400 mt-2" x-show="autoPurgeDays > 0"
+             x-text="'Los datos se borrarán si pasan más de ' + autoPurgeDays + ' días sin actividad. Se comprueba cada hora.'"></p>
+          <p class="text-xs text-gray-400 mt-2" x-show="autoPurgeDays === 0">Los datos se conservan indefinidamente hasta borrado manual.</p>
+        </div>
+
+        <!-- Manual purge -->
+        <div class="bg-white rounded-xl shadow p-4">
+          <h2 class="font-bold text-gray-700 mb-3">Borrado manual</h2>
+          <div class="space-y-3">
+            <div class="flex items-center justify-between gap-4 p-3 bg-red-50 rounded-lg border border-red-100">
+              <div>
+                <p class="text-sm font-medium text-gray-700">Borrar datos de juego</p>
+                <p class="text-xs text-gray-400">Fotos, autores, jugadores, votos (conserva historial)</p>
+              </div>
+              <button @click="purgeAll()"
+                      class="bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-700 transition whitespace-nowrap">
+                🗑️ Borrar datos
+              </button>
+            </div>
+            <div class="flex items-center justify-between gap-4 p-3 bg-red-50 rounded-lg border border-red-200">
+              <div>
+                <p class="text-sm font-medium text-gray-700">Borrar TODO incluyendo historial</p>
+                <p class="text-xs text-gray-400">Elimina absolutamente todo, como una instalación nueva</p>
+              </div>
+              <button @click="purgeAllWithHistory()"
+                      class="bg-red-800 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-900 transition whitespace-nowrap">
+                💀 Borrar TODO
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </template>
+
+  <!-- ==================== PLAYER VIEW ==================== -->
+  <template x-if="view === 'player'">
+    <div class="max-w-3xl mx-auto p-4 sm:p-6 lg:p-8 min-h-screen bg-gray-50">
+
+      <!-- Name entry -->
+      <template x-if="!playerJoined">
+        <div class="flex flex-col items-center justify-center min-h-screen">
+          <h1 class="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-800 mb-2">📷 Photo Quiz</h1>
+          <p class="text-gray-500 mb-8 sm:text-lg">Elige tu nombre para jugar</p>
+          <input type="text" x-model="playerName" placeholder="Tu nombre"
+                 class="w-full max-w-sm border-2 border-indigo-300 rounded-xl px-4 py-3 sm:py-4 text-lg sm:text-xl text-center mb-4 focus:border-indigo-500 focus:outline-none"
+                 @keydown.enter="joinGame()">
+          <button @click="joinGame()" :disabled="!playerName.trim()"
+                  class="bg-indigo-600 text-white px-8 py-3 sm:py-4 rounded-xl text-lg sm:text-xl font-medium hover:bg-indigo-700 disabled:opacity-50 transition">
+            Entrar
+          </button>
+        </div>
+      </template>
+
+      <!-- Joined -->
+      <template x-if="playerJoined">
+        <div>
+          <div class="flex items-center justify-between mb-4 sm:mb-6">
+            <div>
+              <span class="text-sm sm:text-base text-gray-500">Jugando como</span>
+              <h2 class="font-bold text-gray-800 text-lg sm:text-xl" x-text="playerName"></h2>
+            </div>
+            <span class="px-3 py-1 rounded-full text-xs sm:text-sm font-medium"
+                  :class="{
+                    'bg-gray-200': gameState === 'lobby',
+                    'bg-green-100 text-green-700': gameState === 'playing',
+                    'bg-amber-100 text-amber-700': gameState === 'revealed',
+                    'bg-blue-100 text-blue-700': gameState === 'finished'
+                  }"
+                  x-text="gameState === 'lobby' ? 'Esperando...' : gameState === 'playing' ? 'Votando' : gameState === 'revealed' ? 'Revelado' : 'Terminado'"></span>
+          </div>
+
+          <!-- Lobby waiting -->
+          <div x-show="gameState === 'lobby'" class="text-center py-16 sm:py-24">
+            <div class="text-6xl sm:text-7xl mb-4">⏳</div>
+            <p class="text-gray-500 text-lg sm:text-xl">Esperando a que empiece el juego...</p>
+            <p class="text-gray-400 text-sm sm:text-base mt-2">Mira la pantalla TV</p>
+          </div>
+
+          <!-- Voting -->
+          <div x-show="gameState === 'playing'">
+            <div class="text-center mb-4 sm:mb-6">
+              <p class="text-sm sm:text-base text-gray-500">Foto <span x-text="currentPhotoIndex + 1"></span> de <span x-text="totalPhotos"></span></p>
+              <p class="text-gray-700 font-medium mt-1 sm:text-lg">¿Quién hizo esta foto?</p>
+              <p class="text-xs sm:text-sm text-gray-400 mt-1">Mira la foto en la pantalla TV</p>
+            </div>
+
+            <template x-if="!hasVotedCurrent">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                <template x-for="a in authors" :key="a.id">
+                  <button @click="vote(a.id)"
+                          class="w-full text-left px-4 py-3 sm:py-4 bg-white rounded-xl border-2 border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 transition font-medium sm:text-lg"
+                          x-text="a.name">
+                  </button>
+                </template>
+              </div>
+            </template>
+
+            <div x-show="hasVotedCurrent" class="text-center py-8 sm:py-12">
+              <div class="text-4xl sm:text-5xl mb-2">✅</div>
+              <p class="text-gray-600 font-medium sm:text-lg">Voto registrado</p>
+              <p class="text-gray-400 text-sm sm:text-base">Esperando a que se revele el autor...</p>
+            </div>
+          </div>
+
+          <!-- Revealed feedback -->
+          <div x-show="gameState === 'revealed'" class="text-center py-8 sm:py-12">
+            <template x-if="lastVoteResult !== null">
+              <div>
+                <div class="text-5xl sm:text-6xl mb-3" x-text="lastVoteResult.correct ? '🎉' : '😅'"></div>
+                <p class="text-xl sm:text-2xl font-bold" :class="lastVoteResult.correct ? 'text-green-600' : 'text-red-500'"
+                   x-text="lastVoteResult.correct ? '¡Acertaste! +3 puntos' : 'Fallaste'"></p>
+                <p class="text-gray-500 mt-2 sm:text-lg" x-text="'Era: ' + lastVoteResult.authorName"></p>
+              </div>
+            </template>
+            <template x-if="lastVoteResult === null">
+              <div>
+                <div class="text-5xl sm:text-6xl mb-3">👀</div>
+                <p class="text-gray-500 sm:text-lg">No votaste en esta ronda</p>
+                <p class="text-gray-500 mt-2 sm:text-lg" x-text="'Autor: ' + revealedAuthorName"></p>
+              </div>
+            </template>
+
+            <!-- Mini ranking -->
+            <div class="mt-6 bg-white rounded-xl p-4 sm:p-6 text-left">
+              <h3 class="font-bold text-gray-700 text-sm sm:text-base mb-2">Ranking</h3>
+              <template x-for="(p, i) in ranking" :key="p.id">
+                <div class="flex items-center gap-2 py-1 sm:py-2 text-sm sm:text-base" :class="p.id === playerId ? 'font-bold text-indigo-700' : ''">
+                  <span class="w-6 sm:w-8 text-center" x-text="i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i+1)"></span>
+                  <span class="flex-1" x-text="p.name + (p.id === playerId ? ' (tú)' : '')"></span>
+                  <span class="text-amber-600" x-text="p.score + ' pts'"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Finished -->
+          <div x-show="gameState === 'finished'" class="py-8 sm:py-12">
+            <h2 class="text-2xl sm:text-3xl font-bold text-center mb-6">🏆 Resultados Finales</h2>
+            <div class="space-y-2 sm:space-y-3">
+              <template x-for="(p, i) in ranking" :key="p.id">
+                <div class="flex items-center gap-3 bg-white px-4 sm:px-6 py-3 sm:py-4 rounded-xl"
+                     :class="{'ring-2 ring-amber-400': i < 3, 'font-bold bg-indigo-50': p.id === playerId}">
+                  <span class="text-xl sm:text-2xl w-8 sm:w-10 text-center" x-text="i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i+1)"></span>
+                  <span class="flex-1 sm:text-lg" x-text="p.name + (p.id === playerId ? ' (tú)' : '')"></span>
+                  <span class="font-bold text-amber-600 sm:text-lg" x-text="p.score + ' pts'"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <script>
+    function app() {
+      return {
+        // View management
+        view: new URLSearchParams(window.location.search).get('view') || 'select',
+
+        // Socket
+        socket: null,
+
+        // Game state
+        gameState: 'lobby',
+        currentPhotoUrl: null,
+        currentPhotoIndex: 0,
+        currentPhotoId: null,
+        totalPhotos: 0,
+        authors: [],
+        photos: [],
+        players: [],
+        onlinePlayers: [],
+        voteCounts: {},
+        totalVoters: 0,
+        ranking: [],
+        revealedAuthorName: '',
+        gameUrl: '',
+
+        // Admin
+        adminTab: 'game',
+        newAuthorName: '',
+        gameUrlInput: '',
+        autoPurgeDays: 0,
+        gameHistory: [],
+
+        // Player
+        playerId: '',
+        playerName: '',
+        playerJoined: false,
+        hasVotedCurrent: false,
+        lastVoteResult: null,
+
+        init() {
+          // Load player data from localStorage
+          this.playerId = localStorage.getItem('pq_playerId') || this.generateUUID();
+          localStorage.setItem('pq_playerId', this.playerId);
+          this.playerName = localStorage.getItem('pq_playerName') || '';
+
+          // If returning player with name, auto-join
+          if (this.view === 'player' && this.playerName) {
+            this.playerJoined = true;
+          }
+
+          // Connect socket
+          this.socket = io({ transports: ['websocket', 'polling'] });
+
+          this.socket.on('connect', () => {
+            console.log('Socket connected');
+            if (this.playerJoined) {
+              this.socket.emit('join', { playerId: this.playerId, name: this.playerName });
+            }
+            this.fetchState();
+          });
+
+          this.socket.on('state_update', (data) => {
+            const prevPhotoId = this.currentPhotoId;
+            this.gameState = data.state;
+            this.currentPhotoIndex = data.currentPhotoIndex;
+            this.currentPhotoUrl = data.photoUrl;
+            this.totalPhotos = data.totalPhotos;
+            this.currentPhotoId = data.currentPhotoId;
+
+            if (data.currentPhotoAuthorId) {
+              const author = this.authors.find(a => a.id === data.currentPhotoAuthorId);
+              this.revealedAuthorName = author ? author.name : '';
+            }
+
+            // Only reset vote status when the photo actually changes (not on reconnect)
+            if (data.state === 'playing' && data.currentPhotoId !== prevPhotoId && prevPhotoId !== null) {
+              this.hasVotedCurrent = false;
+              this.lastVoteResult = null;
+            }
+          });
+
+          // Server tells us if we already voted for the current photo (on join/reconnect)
+          this.socket.on('vote_status', (data) => {
+            if (data.hasVoted) {
+              this.hasVotedCurrent = true;
+            }
+          });
+
+          this.socket.on('players_update', (data) => {
+            this.players = data.players;
+            this.ranking = [...data.players].sort((a, b) => b.score - a.score);
+          });
+
+          this.socket.on('players_online', (data) => {
+            this.onlinePlayers = data.online;
+          });
+
+          this.socket.on('vote_count', (data) => {
+            this.voteCounts = data.counts;
+            this.totalVoters = data.totalVoters;
+          });
+
+          this.socket.on('revealed', (data) => {
+            this.revealedAuthorName = data.authorName;
+            this.ranking = data.ranking.sort((a, b) => b.score - a.score);
+          });
+
+          this.socket.on('vote_result', (data) => {
+            this.lastVoteResult = data;
+          });
+
+          this.socket.on('game_finished', (data) => {
+            this.ranking = data.ranking.sort((a, b) => b.score - a.score);
+          });
+
+          // Sync view to URL so F5 preserves the current view
+          this.$watch('view', (v) => {
+            const url = new URL(window.location);
+            if (v === 'select') {
+              url.searchParams.delete('view');
+            } else {
+              url.searchParams.set('view', v);
+            }
+            window.history.replaceState({}, '', url);
+            this.scheduleQR();
+          });
+
+          // Generate QR for TV view — schedule render whenever relevant state changes
+          this.$watch('gameUrl', () => this.scheduleQR());
+          this.$watch('gameState', () => this.scheduleQR());
+        },
+
+        async fetchState() {
+          try {
+            const res = await fetch('/api/state');
+            const data = await res.json();
+            this.authors = data.authors;
+            this.photos = data.photos;
+            this.players = data.players;
+            this.ranking = [...data.players].sort((a, b) => b.score - a.score);
+            this.gameUrl = data.session.game_url;
+            this.gameUrlInput = data.session.game_url;
+            this.voteCounts = data.voteCounts;
+            this.totalVoters = data.totalVoters;
+            this.gameState = data.session.state;
+            this.currentPhotoIndex = data.session.current_photo_index;
+            this.totalPhotos = data.totalPhotos;
+            if (data.currentPhoto) {
+              this.currentPhotoUrl = data.currentPhoto.url;
+              this.currentPhotoId = data.currentPhoto.id;
+            }
+            if (data.session.state === 'revealed' && data.currentPhoto) {
+              const author = this.authors.find(a => a.id === data.currentPhoto.author_id);
+              this.revealedAuthorName = author ? author.name : '';
+            }
+
+            // Load admin settings
+            if (this.view === 'admin') {
+              fetch('/api/admin/auto-purge').then(r => r.json()).then(d => {
+                this.autoPurgeDays = d.autoPurgeDays || 0;
+              }).catch(() => {});
+              fetch('/api/admin/history').then(r => r.json()).then(d => {
+                this.gameHistory = d.games || [];
+              }).catch(() => {});
+            }
+
+            this.scheduleQR();
+          } catch (e) {
+            console.error('Error fetching state:', e);
+          }
+        },
+
+        scheduleQR() {
+          if (this.view !== 'tv' || this.gameState !== 'lobby') return;
+          // Retry up to 10 times waiting for canvas to be in DOM
+          let attempts = 0;
+          const tryRender = () => {
+            const canvas = document.getElementById('qr-canvas');
+            if (canvas && this.gameUrl) {
+              QRCode.toCanvas(canvas, this.gameUrl, { width: 400, margin: 2, color: { dark: '#000000', light: '#ffffff' } }, (err) => {
+                if (err) console.error('QR error:', err);
+              });
+            } else if (attempts < 10) {
+              attempts++;
+              setTimeout(tryRender, 100);
+            }
+          };
+          this.$nextTick(tryRender);
+        },
+
+        renderQR() {
+          this.scheduleQR();
+        },
+
+        generateUUID() {
+          return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+            const r = Math.random() * 16 | 0;
+            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+          });
+        },
+
+        // --- Player actions ---
+        joinGame() {
+          if (!this.playerName.trim()) return;
+          this.playerName = this.playerName.trim();
+          localStorage.setItem('pq_playerName', this.playerName);
+          this.playerJoined = true;
+          this.socket.emit('join', { playerId: this.playerId, name: this.playerName });
+        },
+
+        vote(authorId) {
+          if (this.hasVotedCurrent) return;
+          this.hasVotedCurrent = true;
+          this.socket.emit('vote', { playerId: this.playerId, authorId });
+        },
+
+        // --- Admin actions ---
+        async addAuthor() {
+          if (!this.newAuthorName.trim()) return;
+          await fetch('/api/authors', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: this.newAuthorName.trim() }),
+          });
+          this.newAuthorName = '';
+          this.fetchState();
+        },
+
+        async deleteAuthor(id) {
+          if (!confirm('¿Eliminar este autor y todas sus fotos?')) return;
+          await fetch(`/api/authors/${id}`, { method: 'DELETE' });
+          this.fetchState();
+        },
+
+        async uploadPhotos(event, authorId) {
+          const files = event.target.files;
+          for (const file of files) {
+            const formData = new FormData();
+            formData.append('photo', file);
+            formData.append('author_id', authorId);
+            await fetch('/api/upload', { method: 'POST', body: formData });
+          }
+          event.target.value = '';
+          this.fetchState();
+        },
+
+        async deletePhoto(id) {
+          await fetch(`/api/photo/${id}`, { method: 'DELETE' });
+          this.fetchState();
+        },
+
+        getAuthorPhotos(authorId) {
+          return this.photos.filter(p => p.author_id === authorId);
+        },
+
+        async saveGameUrl() {
+          await fetch('/api/game/url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: this.gameUrlInput }),
+          });
+          this.gameUrl = this.gameUrlInput;
+        },
+
+        async gameAction(action) {
+          try {
+            const res = await fetch(`/api/game/${action}`, { method: 'POST' });
+            if (!res.ok) {
+              const err = await res.json();
+              alert(err.error || 'Error');
+            }
+            this.fetchState();
+          } catch (e) {
+            console.error('Game action error:', e);
+          }
+        },
+
+        async purgeAll() {
+          if (!confirm('⚠️ ¿BORRAR TODO? Se eliminarán todas las fotos, autores, jugadores, votos y puntuaciones. Esta acción NO se puede deshacer.')) return;
+          if (!confirm('¿Estás COMPLETAMENTE seguro? Todo se perderá.')) return;
+          await fetch('/api/admin/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ includeHistory: false }) });
+          this.fetchState();
+        },
+
+        async purgeAllWithHistory() {
+          if (!confirm('⚠️ ¿BORRAR TODO INCLUYENDO EL HISTORIAL? Se perderá absolutamente todo. Esta acción NO se puede deshacer.')) return;
+          if (!confirm('¿Estás COMPLETAMENTE seguro? Todo incluido el historial se perderá.')) return;
+          await fetch('/api/admin/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ includeHistory: true }) });
+          this.gameHistory = [];
+          this.fetchState();
+        },
+
+        async saveAutoPurge(days) {
+          this.autoPurgeDays = days;
+          await fetch('/api/admin/auto-purge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ days }),
+          });
+        },
+
+        async loadHistory() {
+          const res = await fetch('/api/admin/history');
+          const data = await res.json();
+          this.gameHistory = data.games || [];
+        },
+
+        async deleteHistoryEntry(id) {
+          if (!confirm('¿Eliminar esta partida del historial?')) return;
+          await fetch(`/api/admin/history/${id}`, { method: 'DELETE' });
+          this.loadHistory();
+        },
+
+        async clearAllHistory() {
+          if (!confirm('¿Borrar TODO el historial de partidas?')) return;
+          await fetch('/api/admin/history', { method: 'DELETE' });
+          this.gameHistory = [];
+        },
+
+        formatDate(dateStr) {
+          if (!dateStr) return '';
+          const d = new Date(dateStr + 'Z');
+          return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        },
+      };
+    }
+  </script>
+</body>
+</html>

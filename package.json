@@ -1,0 +1,16 @@
+{
+  "name": "photo-quiz-backend",
+  "version": "3.0.0",
+  "scripts": {
+    "start": "node server.js",
+    "test-load": "node test-load.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "express": "^4.21.0",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.8.0",
+    "socket.io-client": "^4.8.3",
+    "uuid": "^9.0.1"
+  }
+}

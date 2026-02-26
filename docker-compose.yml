@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    container_name: photo-quiz
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./photos:/app/photos
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001

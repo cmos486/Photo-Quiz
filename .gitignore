@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Data (runtime)
+data/
+photos/
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
