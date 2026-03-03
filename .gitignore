@@ -18,3 +18,8 @@ Thumbs.db
 
 # Claude
 .claude/
+CLAUDE.md
+CLAUDE.local.md
+
+# Logs
+*.log
