@@ -12,5 +12,8 @@
     "socket.io": "^4.8.0",
     "socket.io-client": "^4.8.3",
     "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
   }
 }
