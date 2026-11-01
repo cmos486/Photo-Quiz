@@ -108,7 +108,7 @@ server {
     location /api/ {
         proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
-        client_max_body_size 15M;   # backend acepta 14MB (MAX_UPLOAD_MB)
+        client_max_body_size 15M;   # backend acepta 5MB por defecto (MAX_UPLOAD_MB)
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -161,7 +161,7 @@ Cadena típica: `móvil → proxy inverso / WAF → [nginx host opcional] → co
 - **IP real del cliente**: Express usa `trust proxy = loopback, linklocal, uniquelocal` (todos los saltos
   internos son IPs privadas). Comprobar con `curl -H "X-Admin-Token: $T" https://<dominio>/api/admin/whoami`:
   `ip` debe ser tu IP pública, nunca la del proxy, nginx o `172.x` de docker.
-- **Tamaños**: backend 14MB (`MAX_UPLOAD_MB`), nginx 15M, proxy inverso ≥ 16MB.
+- **Tamaños**: backend 5MB por foto (`MAX_UPLOAD_MB`, ampliable por env sin rebuild: editar `.env` + `docker compose up -d`), nginx 15M, proxy inverso ≥ 16MB.
 - **WebSocket**: socket.io hace ping cada 25s, así que cualquier idle timeout del proxy ≥ 60s basta;
   aun así se recomienda desactivarlo/alargarlo para `/socket.io/`.
 - **Purga automática**: desactivada por defecto (0). Si está activa, el arranque lo anuncia en el log y

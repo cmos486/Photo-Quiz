@@ -10,7 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const PORT = process.env.PORT || 3001;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'photoquiz';
-const MAX_UPLOAD_MB = parseInt(process.env.MAX_UPLOAD_MB, 10) || 14;
+const MAX_UPLOAD_MB = parseInt(process.env.MAX_UPLOAD_MB, 10) || 5; // per-file upload limit (env-overridable)
 // Proxies in front of Express (reverse proxy / load balancer, optional host nginx, docker bridge) live on
 // private/loopback ranges. Trusting those ranges makes req.ip = first public hop in X-Forwarded-For.
 // Override with TRUST_PROXY (e.g. "1", "2", or a comma list of IPs/CIDRs) if topology changes.
@@ -452,7 +452,7 @@ app.get('/api/admin/whoami', requireAdmin, (req, res) => {
 // Public: get state (players/TV need this without auth)
 app.get('/api/state', (req, res) => {
   const state = getFullState();
-  res.json(state);
+  res.json({ ...state, maxUploadMB: MAX_UPLOAD_MB });
 });
 
 // ---- All routes below require admin auth ----
@@ -461,8 +461,11 @@ app.get('/api/state', (req, res) => {
 function uploadSingle(req, res, next) {
   upload.single('photo')(req, res, (err) => {
     if (!err) return next();
-    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: `La foto supera ${MAX_UPLOAD_MB} MB` });
-    return res.status(400).json({ error: err.message || 'Subida no válida' });
+    // multer removes the partially written file itself when it aborts on a limit
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: `La foto supera el máximo de ${MAX_UPLOAD_MB} MB`, code: 'FILE_TOO_LARGE', maxUploadMB: MAX_UPLOAD_MB });
+    }
+    return res.status(400).json({ error: err.message || 'Subida no válida', code: err.code || 'INVALID_UPLOAD' });
   });
 }
 
