@@ -146,6 +146,7 @@ async function main() {
   check(players.every(p => st1.players.some(x => x.id === p.id && x.name === p.name)), 'todos registrados con su nombre (emoji/acentos intactos)');
 
   // --- Game
+  const histBefore = (await api('GET', '/api/admin/history')).json.games.length;
   console.log('\n[4] Partida');
   const start = await api('POST', '/api/game/start');
   check(start.status === 200, 'start OK');
@@ -224,12 +225,28 @@ async function main() {
   console.log('\n[5] Final');
   const fin = await api('POST', '/api/game/finish');
   check(fin.status === 200, 'finish OK');
-  const hist1 = (await api('GET', '/api/admin/history')).json.games.length;
-  await api('POST', '/api/game/finish');
+  const h1 = (await api('GET', '/api/admin/history')).json.games;
+  const archivedVotes = h1[0].players.reduce((n, p) => n + p.total_votes, 0);
+  check(h1.length === histBefore + 1, `finish archiva exactamente 1 partida (${histBefore} -> ${h1.length})`);
+  check(archivedVotes === N_PLAYERS * N_PHOTOS, `partida archivada CON votos reales: ${archivedVotes} (esperado ${N_PLAYERS * N_PHOTOS})`);
+  const fin2 = await api('POST', '/api/game/finish');
+  const h2 = (await api('GET', '/api/admin/history')).json.games.length;
+  check(h2 === h1.length, `doble finish no duplica historial (${h1.length} -> ${h2}, HTTP ${fin2.status})`);
+  const rst = await api('POST', '/api/game/reset');
+  const h3 = (await api('GET', '/api/admin/history')).json.games.length;
+  check(rst.status === 200 && h3 === h1.length, `finish + reset no duplica historial (${h1.length} -> ${h3})`);
+
+  // Reset mid-game (no finish) with votes: must archive exactly once, and a later reset must not archive again
+  await api('POST', '/api/game/start');
+  await sleep(800);
+  const stR = (await api('GET', '/api/state')).json;
+  await Promise.all(players.map(p => p.vote(authorIds[0], stR.currentPhoto.id)));
   await api('POST', '/api/game/reset');
-  const hist2 = (await api('GET', '/api/admin/history')).json.games.length;
-  check(hist2 === hist1, `doble finish + reset no duplica historial (${hist1} -> ${hist2})`);
-  const finalPlayers = (await api('GET', '/api/admin/history')).json.games[0].players;
+  const h4 = (await api('GET', '/api/admin/history')).json.games.length;
+  await api('POST', '/api/game/reset');
+  const h5 = (await api('GET', '/api/admin/history')).json.games.length;
+  check(h4 === h3 + 1 && h5 === h4, `reset a mitad de partida con votos archiva 1 vez y no repite (${h3} -> ${h4} -> ${h5})`);
+  const finalPlayers = (await api('GET', '/api/admin/history')).json.games.find(g => g.id === h1[0].id).players;
   check(players.every(p => (finalPlayers.find(x => x.player_name === p.name) || {}).score === p.expectedScore), 'puntuación archivada = 3 x aciertos de cada jugador');
 
   players.forEach(p => p.socket.disconnect());
