@@ -36,6 +36,9 @@ const N_PHOTOS = parseInt(opt('photos', 6), 10);
 const RESTART_AT = parseInt(opt('restart-at', 0), 10);
 const STAGGER = parseInt(opt('stagger', 100), 10);
 const PASS = process.env.ADMIN_PASSWORD;
+// Real browsers always send a User-Agent; Node's fetch/ws may not. WAFs (e.g. CrowdSec
+// "no-user-agent" rules) ban clients without one, so the simulator must look like a browser.
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 PhotoQuizRehearsal/1.0';
 
 const failures = [];
 const check = (cond, msg) => { if (cond) console.log(`  ✓ ${msg}`); else { console.log(`  ✗ ${msg}`); failures.push(msg); } };
@@ -43,7 +46,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 let token = '';
 
 async function api(method, url, body, isForm) {
-  const headers = { 'X-Admin-Token': token };
+  const headers = { 'X-Admin-Token': token, 'User-Agent': UA };
   if (body && !isForm) headers['Content-Type'] = 'application/json';
   const res = await fetch(BASE + url, { method, headers, body: isForm ? body : body ? JSON.stringify(body) : undefined });
   const text = await res.text();
@@ -60,7 +63,7 @@ function makePlayer(i) {
     socket: null, state: null, photoId: null, voted: {}, results: {}, expectedScore: 0, counts: null, connectErrors: 0,
   };
   p.connect = () => new Promise((resolve) => {
-    const s = io(BASE, { transports: ['polling', 'websocket'], reconnection: true, timeout: 10000 });
+    const s = io(BASE, { transports: ['polling', 'websocket'], reconnection: true, timeout: 10000, extraHeaders: { 'User-Agent': UA } });
     p.socket = s;
     s.on('connect', () => { s.emit('join', { playerId: p.id, name: p.name }); resolve(); });
     s.on('connect_error', (e) => { p.connectErrors++; p.lastError = e.message; });
@@ -89,6 +92,7 @@ function makePlayer(i) {
 async function main() {
   console.log(`=== Ensayo general contra ${BASE} (${N_PLAYERS} jugadores, ${N_PHOTOS} fotos) ===\n`);
   if (!PASS) { console.error('Falta ADMIN_PASSWORD en el entorno'); process.exit(2); }
+  if (N_PLAYERS < 3) { console.error('Se necesitan al menos 3 jugadores (--players 3)'); process.exit(2); }
 
   // --- Login + whoami
   const login = await api('POST', '/api/admin/login', { password: PASS });
@@ -133,6 +137,10 @@ async function main() {
   check(uploaded === N_PHOTOS, `${uploaded}/${N_PHOTOS} fotos subidas`);
 
   // --- Players
+  // Roles: some players drop before voting, one drops during reveal, last one tests dup/late votes
+  const R_DROP = Math.min(3, N_PLAYERS - 2);   // first R_DROP players reconnect mid-round
+  const R_REVEAL = N_PLAYERS - 2;               // disconnected during reveal
+  const R_LAST = N_PLAYERS - 1;                 // duplicate + late vote
   console.log(`\n[3] ${N_PLAYERS} joins casi simultáneos (stagger ${STAGGER}ms)`);
   const players = Array.from({ length: N_PLAYERS }, (_, i) => makePlayer(i));
   const t0 = Date.now();
@@ -160,19 +168,19 @@ async function main() {
     check(players.every(p => p.photoId === photo.id && p.state === 'playing'), 'todos los clientes ven la misma foto en playing');
 
     // Forced disconnect of 3 players before voting; they reconnect and vote
-    const dropped = players.slice(0, 3);
+    const dropped = players.slice(0, R_DROP);
     dropped.forEach(p => p.socket.io.engine.close());
 
     // Burst of votes (all in parallel)
     const choices = players.map(() => authorIds[Math.floor(Math.random() * authorIds.length)]);
     const acks = await Promise.all(players.map((p, i) => p.vote(choices[i], photo.id)));
     const ok = acks.filter(a => a && a.ok).length;
-    check(ok === N_PLAYERS, `ráfaga de votos: ${ok}/${N_PLAYERS} confirmados (incl. 3 reconectando; reintentos: ${players.reduce((n, p) => n + (p.retries || 0), 0)})`);
+    check(ok === N_PLAYERS, `ráfaga de votos: ${ok}/${N_PLAYERS} confirmados (incl. ${R_DROP} reconectando; reintentos: ${players.reduce((n, p) => n + (p.retries || 0), 0)})`);
     players.forEach(p => { p.retries = 0; });
     players.forEach((p, i) => { p.voted[photo.id] = choices[i]; });
 
     // Duplicate vote must be idempotent, not double-counted
-    const dup = await players[5].vote(authorIds[0], photo.id);
+    const dup = await players[R_LAST].vote(authorIds[0], photo.id);
     check(dup && dup.ok && dup.duplicate, 'voto doble = idempotente');
     await sleep(500);
     const stV = (await api('GET', '/api/state')).json;
@@ -182,25 +190,25 @@ async function main() {
     check(players[0].counts && players[0].counts.totalPlayers === N_PLAYERS, `denominador TV = ${players[0].counts && players[0].counts.totalPlayers} (sin jugadores fantasma)`);
 
     // Player 4 drops right before reveal and comes back after
-    players[3].socket.disconnect();
+    players[R_REVEAL].socket.disconnect();
     const rev = await api('POST', '/api/game/reveal');
     check(rev.status === 200, `reveal OK (${rev.json && rev.json.authorName})`);
     await sleep(700);
-    const late = await players[6].vote(authorIds[0], photo.id);
+    const late = await players[R_LAST].vote(authorIds[0], photo.id);
     check(late && !late.ok && late.reason === 'closed', 'voto tras revelar rechazado');
-    players[3].socket.connect();
+    players[R_REVEAL].socket.connect();
     await sleep(1500);
     const correctAuthor = photosOrdered.find(x => x.id === photo.id).author_id;
-    check(players[3].results[photo.id] && players[3].results[photo.id].correct === (players[3].voted[photo.id] === correctAuthor),
+    check(players[R_REVEAL].results[photo.id] && players[R_REVEAL].results[photo.id].correct === (players[R_REVEAL].voted[photo.id] === correctAuthor),
       'jugador desconectado durante el reveal recupera su resultado al reconectar');
     players.forEach(p => { if (p.voted[photo.id] === correctAuthor) p.expectedScore += 3; });
-    check(players.filter(p => p !== players[3]).every(p => p.results[photo.id]), 'resto recibió vote_result');
+    check(players.filter(p => p !== players[R_REVEAL]).every(p => p.results[photo.id]), 'resto recibió vote_result');
 
     if (RESTART_AT && k + 1 === RESTART_AT) {
       console.log('\n  >>> REINICIA EL CONTENEDOR AHORA (docker compose restart). Esperando a que vuelva...');
       await sleep(5000);
       for (let t = 0; t < 120; t++) {
-        try { const r = await fetch(BASE + '/api/state'); if (r.ok) break; } catch {}
+        try { const r = await fetch(BASE + '/api/state', { headers: { 'User-Agent': UA } }); if (r.ok) break; } catch {}
         await sleep(1000);
       }
       await sleep(6000); // let sockets reconnect
