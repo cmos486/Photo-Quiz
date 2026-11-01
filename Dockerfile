@@ -7,6 +7,7 @@ RUN npm ci --omit=dev
 
 COPY server.js ./
 COPY index.html ./public/index.html
+COPY tailwind.css ./public/tailwind.css
 
 # Crear carpetas de datos y asignar permisos al usuario node
 RUN mkdir -p /app/photos /app/data && chown -R node:node /app/photos /app/data

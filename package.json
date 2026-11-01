@@ -3,7 +3,8 @@
   "version": "3.0.0",
   "scripts": {
     "start": "node server.js",
-    "test-load": "node test-load.js"
+    "test-load": "node test-load.js",
+    "build:css": "tailwindcss -c tailwind.config.js -i tailwind.input.css -o tailwind.css --minify"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
@@ -14,6 +15,7 @@
     "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "playwright": "^1.56.1"
+    "playwright": "^1.56.1",
+    "tailwindcss": "^3.4.17"
   }
 }

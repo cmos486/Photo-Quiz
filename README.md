@@ -78,7 +78,7 @@ mkdir -p /opt/photo-quiz /var/www/quiz
 # (docker-compose.yml, Dockerfile, server.js, package.json, test-load.js)
 
 # Copiar frontend
-cp index.html /var/www/quiz/index.html
+cp index.html tailwind.css /var/www/quiz/
 
 # Crear carpetas de datos
 mkdir -p /opt/photo-quiz/photos /opt/photo-quiz/data
@@ -175,6 +175,24 @@ ADMIN_PASSWORD=xxx node rehearsal.js https://<tu-dominio> --players 18 --photos 
 # Con reinicio del contenedor a mitad de partida (el script pausa tras la foto 2)
 ADMIN_PASSWORD=xxx node rehearsal.js https://<tu-dominio> --players 18 --photos 4 --restart-at 2 --cleanup
 ```
+
+## Estilos (Tailwind precompilado)
+
+El CSS de Tailwind (v3.4.17) está **precompilado y commiteado** en `tailwind.css` (~20 KB, ~4 KB gzip).
+No se usa el CDN de Tailwind (compilaba en el navegador y tardaba segundos en móviles) y **no hay paso
+de build en el despliegue**: el `Dockerfile` copia `tailwind.css` junto a `index.html`.
+
+Si añades o cambias clases en `index.html`:
+
+```bash
+npm install            # una vez (tailwindcss es devDependency)
+npm run build:css      # regenera tailwind.css a partir de index.html
+git add tailwind.css   # y commitea
+```
+
+Las clases deben aparecer escritas completas en `index.html` (también dentro de `:class`); no las
+construyas concatenando strings o no se incluirán. Si sirves el frontend con nginx desde
+`/var/www/quiz`, copia también `tailwind.css` allí.
 
 ## Comandos de gestión
 

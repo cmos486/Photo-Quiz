@@ -14,7 +14,8 @@
  *   --offline N     jugadores a los que se corta la red durante la revelación (default 2)
  *   --cleanup       purga los datos de juego al terminar (conserva historial)
  *   --headed        ver los navegadores (depuración)
- *   --no-tailwind   bloquea SOLO el CSS de Tailwind CDN en las pestañas de prueba. Tailwind CDN
+ *   --no-tailwind   (solo para versiones antiguas que usaban el CDN; desde el CSS precompilado
+ *                   no tiene efecto) bloquea SOLO el CSS de Tailwind CDN en las pestañas. Tailwind CDN
  *                   compila CSS en el navegador (varios segundos de CPU por pestaña); con muchas
  *                   pestañas en una sola máquina las satura entre sí, cosa que no ocurre con
  *                   móviles reales (cada uno con su CPU). Mantiene index.html, Alpine, socket.io
