@@ -9,6 +9,8 @@
  * Opciones:
  *   --players N        jugadores simulados (default 18)
  *   --photos N         fotos a usar (default 6, subidas desde ./photos o generadas)
+ *   --authors A        nº de autores (default: min(fotos, 6)); con --photos-per-author
+ *   --photos-per-author K  K fotos por autor (fotos = A x K; ignora --photos)
  *   --restart-at K     pausa tras revelar la foto K para que reinicies el contenedor
  *                      (docker compose restart) y comprueba que el estado sobrevive
  *   --cleanup          al terminar, purga los datos de juego (conserva historial)
@@ -32,7 +34,10 @@ const BASE = (args.find(a => !a.startsWith('--') && /^https?:/.test(a)) || 'http
 const opt = (name, def) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : def; };
 const flag = (name) => args.includes(`--${name}`);
 const N_PLAYERS = parseInt(opt('players', 18), 10);
-const N_PHOTOS = parseInt(opt('photos', 6), 10);
+const PPA = parseInt(opt('photos-per-author', 0), 10);
+const N_AUTHORS_OPT = parseInt(opt('authors', 0), 10);
+const N_PHOTOS = PPA > 0 ? (N_AUTHORS_OPT || 6) * PPA : parseInt(opt('photos', 6), 10);
+const N_AUTHORS = PPA > 0 ? (N_AUTHORS_OPT || 6) : (N_AUTHORS_OPT || Math.min(N_PHOTOS, 6));
 const RESTART_AT = parseInt(opt('restart-at', 0), 10);
 const STAGGER = parseInt(opt('stagger', 100), 10);
 const PASS = process.env.ADMIN_PASSWORD;
@@ -90,7 +95,7 @@ function makePlayer(i) {
 }
 
 async function main() {
-  console.log(`=== Ensayo general contra ${BASE} (${N_PLAYERS} jugadores, ${N_PHOTOS} fotos) ===\n`);
+  console.log(`=== Ensayo general contra ${BASE} (${N_PLAYERS} jugadores, ${N_AUTHORS} autores, ${N_PHOTOS} fotos) ===\n`);
   if (!PASS) { console.error('Falta ADMIN_PASSWORD en el entorno'); process.exit(2); }
   if (N_PLAYERS < 3) { console.error('Se necesitan al menos 3 jugadores (--players 3)'); process.exit(2); }
 
@@ -125,7 +130,7 @@ async function main() {
   // --- Authors + photos
   console.log('\n[2] Autores y fotos');
   const authorIds = [];
-  for (let i = 0; i < Math.min(N_PHOTOS, 6); i++) {
+  for (let i = 0; i < N_AUTHORS; i++) {
     const r = await api('POST', '/api/authors', { name: `Autor Ensayo ${i + 1}` });
     authorIds.push(r.json.id);
   }
@@ -137,11 +142,18 @@ async function main() {
       : Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
     const form = new FormData();
     form.append('photo', new Blob([buf], { type: 'image/jpeg' }), `ensayo${i}.jpg`);
-    form.append('author_id', String(authorIds[i % authorIds.length]));
+    const aid = authorIds[PPA > 0 ? Math.floor(i / PPA) : i % authorIds.length];
+    form.append('author_id', String(aid));
     const r = await api('POST', '/api/upload', form, true);
     if (r.status === 200) uploaded++; else console.log(`  ! upload ${i} -> ${r.status} ${JSON.stringify(r.json)}`);
   }
   check(uploaded === N_PHOTOS, `${uploaded}/${N_PHOTOS} fotos subidas`);
+  {
+    const stU = (await api('GET', '/api/state')).json;
+    const perAuthor = authorIds.map(id => stU.photos.filter(ph => ph.author_id === id).length);
+    const expected = PPA > 0 ? perAuthor.every(n => n === PPA) : perAuthor.reduce((a, b) => a + b, 0) === N_PHOTOS;
+    check(expected, `reparto de fotos por autor: [${perAuthor.join(',')}]`);
+  }
   await sleep(500);
   const earlyAuthors = (early.last && early.last.authors) || [];
   check(authorIds.every(id => earlyAuthors.some(a => a.id === id)),
@@ -172,10 +184,15 @@ async function main() {
   await sleep(800);
   const photosOrdered = (await api('GET', '/api/state')).json.photos;
 
+  const seenPhotos = new Set();
+  const roundIssues = [];
   for (let k = 0; k < N_PHOTOS; k++) {
     const st = (await api('GET', '/api/state')).json;
     const photo = st.currentPhoto;
     console.log(`  -- Foto ${k + 1}/${N_PHOTOS} (id ${photo.id})`);
+    if (st.session.current_photo_index !== k) roundIssues.push(`ronda ${k + 1}: índice ${st.session.current_photo_index}`);
+    if (seenPhotos.has(photo.id)) roundIssues.push(`ronda ${k + 1}: foto ${photo.id} repetida`);
+    seenPhotos.add(photo.id);
     check(players.every(p => p.photoId === photo.id && p.state === 'playing'), 'todos los clientes ven la misma foto en playing');
 
     // Forced disconnect of 3 players before voting; they reconnect and vote
@@ -204,6 +221,10 @@ async function main() {
     players[R_REVEAL].socket.disconnect();
     const rev = await api('POST', '/api/game/reveal');
     check(rev.status === 200, `reveal OK (${rev.json && rev.json.authorName})`);
+    {
+      const expAuthor = st.authors.find(a => a.id === photosOrdered.find(x => x.id === photo.id).author_id);
+      if (!rev.json || rev.json.authorName !== expAuthor.name) roundIssues.push(`ronda ${k + 1}: autor revelado "${rev.json && rev.json.authorName}" ≠ "${expAuthor.name}"`);
+    }
     await sleep(700);
     check(early.last && early.last.state === 'revealed' && early.last.currentPhotoAuthorName === rev.json.authorName,
       'state_update revelado lleva el nombre del autor (TV / jugador sin voto)');
@@ -241,6 +262,9 @@ async function main() {
       await sleep(800);
     }
   }
+
+  check(seenPhotos.size === N_PHOTOS, `recorridas ${seenPhotos.size}/${N_PHOTOS} fotos distintas, sin saltos ni repeticiones`);
+  check(roundIssues.length === 0, `integridad por ronda (índice, foto, autor revelado)${roundIssues.length ? ': ' + roundIssues.slice(0, 5).join(' | ') : ''}`);
 
   // --- Finish
   console.log('\n[5] Final');
