@@ -1,6 +1,34 @@
 # Changelog — rama review-evento
 
-## Robustez para evento en directo
+## Temáticas, música y rendimiento (`8f14c0d` … `8990325`)
+
+### Funcional
+- **Autores siempre al día en todos los clientes** (`39c330f`): `state_update` incluye la lista de autores
+  y, al revelar, el nombre del autor. Una TV o móvil abiertos antes de crear los autores ya muestran
+  botones de voto, barras y nombre revelado sin recargar. `/api/state` incluye `currentPhotoAuthorName`
+  para recuperar el nombre al recargar durante la revelación. Nunca se envía el autor mientras se vota.
+- **Límite de subida de 5 MB por foto** (`8f14c0d`): `MAX_UPLOAD_MB` (por defecto 5, configurable por env),
+  413 con JSON `{error, code: FILE_TOO_LARGE, maxUploadMB}`, otros errores de subida 400 con código.
+  `/api/state` expone `maxUploadMB` y el panel comprueba el tamaño antes de subir.
+- **Temática visual** (`c001999`): `none` / `halloween` / `navidad` desde Ajustes del admin
+  (`POST /api/admin/theme`), aplicada en TV y móviles en vivo. `none` = aspecto original.
+- **Música de fondo solo en la TV** (`c001999`, `8990325`): MP3 en `audio/` (bind mount de solo lectura,
+  no versionados): `ambient.mp3`, `halloween.mp3`, `navidad.mp3`, con `ambient.mp3` como fallback común.
+  Reproductor nativo en bucle, arranca en pausa (botón de activar, pausa y volumen). Sin fichero aplicable
+  no se pide nada; `/audio/<inexistente>` devuelve 404.
+
+### Rendimiento
+- **Tailwind precompilado** (`11a95e6`): `tailwind.css` generado una vez y commiteado en lugar del CDN que
+  compilaba en el navegador. Mismo aspecto (comparado píxel a píxel) y carga de la página ~5× más rápida.
+  Regenerar con `npm run build:css`.
+
+### Operación / pruebas
+- Volumen `./audio:/app/audio:ro` en `docker-compose.yml`; el `Dockerfile` copia `tailwind.css`.
+- Scripts de ensayo ampliados: navegador real (`rehearsal-browser.js`), estado del cliente
+  (`test-client-state.js`), límite de subida (`test-upload-limit.js`), y en `rehearsal.js` User-Agent de
+  navegador, `--authors` / `--photos-per-author` e integridad por ronda.
+
+## Robustez para evento en directo (`ef3e9b9`, `009abce`, `6b184f5`)
 
 ### Bloqueantes corregidos
 - **Crash por payload malformado**: un `join`/`vote` con tipos inesperados tumbaba el proceso. Ahora se validan tipos, cada handler de socket va envuelto en try/catch y hay red de seguridad `uncaughtException`.
@@ -19,7 +47,7 @@
 - Indicador "Reconectando…" en la vista de jugador.
 
 ### Configuración / operación
-- `MAX_UPLOAD_MB` (default 14), `TRUST_PROXY` en docker-compose y `.env.example`.
+- `MAX_UPLOAD_MB` (entonces 14 por defecto; desde `8f14c0d`, 5), `TRUST_PROXY` en docker-compose y `.env.example`.
 - Purga automática: log explícito al arrancar y antes de borrar; nunca purga con partida en curso.
 - `GET /api/admin/whoami` (admin) para validar la IP que ve Express.
 - `rehearsal.js`: ensayo general automatizado (joins en ráfaga, votos con ack, reconexiones forzadas, voto doble/tardío, coherencia de contadores, reinicio a mitad de partida, historial).
