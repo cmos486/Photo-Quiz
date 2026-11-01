@@ -411,7 +411,7 @@ app.get('/api/state', (req, res) => {
 // ---- All routes below require admin auth ----
 
 // Upload photo
-app.post('/api/upload', requireAdmin, rateLimitMiddleware('upload', 20, 3600000), upload.single('photo'), (req, res) => {
+app.post('/api/upload', requireAdmin, upload.single('photo'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No se envió foto' });
   const authorId = req.body.author_id;
   if (!authorId) {
@@ -538,6 +538,7 @@ app.post('/api/game/reveal', requireAdmin, (req, res) => {
 // Next photo
 app.post('/api/game/next', requireAdmin, (req, res) => {
   const session = stmts.getSession.get();
+  if (session.state !== 'revealed') return res.status(400).json({ error: 'Revela la foto actual antes de pasar a la siguiente' });
   const photos = stmts.getPhotos.all();
   const nextIndex = session.current_photo_index + 1;
 
@@ -553,7 +554,9 @@ app.post('/api/game/next', requireAdmin, (req, res) => {
 
 // Finish game
 app.post('/api/game/finish', requireAdmin, (req, res) => {
-  archiveGame();
+  const current = stmts.getSession.get();
+  if (current.state === 'lobby') return res.status(400).json({ error: 'No hay partida en curso' });
+  if (current.state !== 'finished') archiveGame();
   stmts.updateState.run('finished');
   const ranking = stmts.getPlayers.all();
   io.emit('game_finished', { ranking });
@@ -640,6 +643,16 @@ app.get('*', (req, res) => {
 });
 
 // --- Socket.io ---
+function isValidPlayerId(id) {
+  return typeof id === 'string' && id.length > 0 && id.length <= 64;
+}
+// Wrap socket handlers: a malformed message must never crash the whole server
+function safeHandler(name, fn) {
+  return (...args) => {
+    try { fn(...args); } catch (err) { console.error(`[Socket:${name}]`, err.message); }
+  };
+}
+
 const connectedPlayers = new Map(); // playerId -> socketId
 
 io.on('connection', (socket) => {
@@ -657,8 +670,9 @@ io.on('connection', (socket) => {
   });
   socket.emit('players_update', { players: state.players });
 
-  socket.on('join', ({ playerId, name }) => {
-    if (!playerId || !name) return;
+  socket.on('join', safeHandler('join', (payload) => {
+    const { playerId, name } = payload || {};
+    if (!isValidPlayerId(playerId) || typeof name !== 'string') return;
     const safeName = sanitize(name, 30);
     if (!safeName) return;
     socket.playerId = playerId;
@@ -678,12 +692,13 @@ io.on('connection', (socket) => {
     }
 
     broadcastState();
-  });
+  }));
 
-  socket.on('vote', ({ playerId, authorId }) => {
-    if (!playerId || !authorId) return;
-    // Prevent vote spoofing: socket can only vote with its own playerId
-    if (socket.playerId && socket.playerId !== playerId) return;
+  socket.on('vote', safeHandler('vote', (payload) => {
+    const { playerId, authorId } = payload || {};
+    if (!isValidPlayerId(playerId) || !Number.isInteger(authorId)) return;
+    // Socket must have joined, and can only vote with its own playerId
+    if (!socket.playerId || socket.playerId !== playerId) return;
 
     const session = stmts.getSession.get();
     if (session.state !== 'playing') return;
@@ -712,7 +727,7 @@ io.on('connection', (socket) => {
       totalVoters: votes.length,
       totalPlayers: players.length,
     });
-  });
+  }));
 
   socket.on('disconnect', () => {
     console.log(`Socket desconectado: ${socket.id}`);
@@ -734,6 +749,9 @@ app.use((err, req, res, _next) => {
   console.error('[Error]', err.message);
   res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Error interno' : err.message });
 });
+
+process.on('uncaughtException', (err) => console.error('[uncaughtException]', err));
+process.on('unhandledRejection', (err) => console.error('[unhandledRejection]', err));
 
 // --- Start ---
 server.listen(PORT, '0.0.0.0', () => {
