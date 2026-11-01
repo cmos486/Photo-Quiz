@@ -80,7 +80,7 @@
           <div class="bg-gray-900 px-6 py-4">
             <div class="max-w-4xl mx-auto">
               <div class="text-center text-sm text-gray-400 mb-3">
-                <span x-text="totalVoters"></span>/<span x-text="players.length"></span> votos recibidos
+                <span x-text="totalVoters"></span>/<span x-text="totalPlayers"></span> votos recibidos
               </div>
               <div class="grid gap-2" :style="'grid-template-columns: repeat(' + Math.min(authors.length, 4) + ', 1fr)'">
                 <template x-for="a in authors" :key="a.id">
@@ -235,6 +235,7 @@
               + Autor
             </button>
           </div>
+          <p x-show="uploadStatus" class="text-sm text-indigo-700 mb-3" x-text="uploadStatus"></p>
           <div class="space-y-4">
             <template x-for="author in authors" :key="author.id">
               <div class="border rounded-lg p-3">
@@ -242,18 +243,19 @@
                   <h3 class="font-bold text-gray-800" x-text="author.name"></h3>
                   <div class="flex gap-2 items-center">
                     <span class="text-xs text-gray-400" x-text="getAuthorPhotos(author.id).length + ' fotos'"></span>
-                    <button @click="deleteAuthor(author.id)" class="text-red-500 hover:text-red-700 text-sm">✕ Eliminar</button>
+                    <button @click="deleteAuthor(author.id)" x-show="gameState === 'lobby'" class="text-red-500 hover:text-red-700 text-sm">✕ Eliminar</button>
                   </div>
                 </div>
                 <div class="mb-2">
                   <input type="file" multiple accept="image/*" @change="uploadPhotos($event, author.id)"
                          class="text-sm text-gray-500 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
                 </div>
+                <p x-show="gameState !== 'lobby'" class="text-xs text-gray-400 mb-1">Borrado bloqueado durante la partida</p>
                 <div class="flex flex-wrap gap-2">
                   <template x-for="photo in getAuthorPhotos(author.id)" :key="photo.id">
                     <div class="relative group">
                       <img :src="photo.url" class="w-20 h-20 object-cover rounded-lg">
-                      <button @click="deletePhoto(photo.id)"
+                      <button @click="deletePhoto(photo.id)" x-show="gameState === 'lobby'"
                               class="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
                         ✕
                       </button>
@@ -316,7 +318,7 @@
           </div>
           <div x-show="gameState === 'playing' || gameState === 'revealed'" class="mt-3 text-sm text-gray-500">
             Foto <span x-text="currentPhotoIndex + 1"></span> de <span x-text="totalPhotos"></span>
-            — <span x-text="totalVoters"></span>/<span x-text="players.length"></span> votos recibidos
+            — <span x-text="totalVoters"></span>/<span x-text="totalPlayers"></span> votos recibidos
           </div>
         </div>
 
@@ -472,6 +474,7 @@
         <div class="flex flex-col items-center justify-center min-h-screen">
           <h1 class="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-800 mb-2">📷 Photo Quiz</h1>
           <p class="text-gray-500 mb-8 sm:text-lg">Elige tu nombre para jugar</p>
+          <p x-show="voteError" class="text-red-600 text-sm mb-3" x-text="voteError"></p>
           <input type="text" x-model="playerName" placeholder="Tu nombre"
                  class="w-full max-w-sm border-2 border-indigo-300 rounded-xl px-4 py-3 sm:py-4 text-lg sm:text-xl text-center mb-4 focus:border-indigo-500 focus:outline-none"
                  @keydown.enter="joinGame()">
@@ -485,6 +488,7 @@
       <!-- Joined -->
       <template x-if="playerJoined">
         <div>
+          <div x-show="!connected" class="mb-3 text-center text-sm bg-amber-100 text-amber-800 rounded-lg py-2">Reconectando...</div>
           <div class="flex items-center justify-between mb-4 sm:mb-6">
             <div>
               <span class="text-sm sm:text-base text-gray-500">Jugando como</span>
@@ -515,7 +519,9 @@
               <p class="text-xs sm:text-sm text-gray-400 mt-1">Mira la foto en la pantalla TV</p>
             </div>
 
-            <template x-if="!hasVotedCurrent">
+            <p x-show="voteError" class="text-center text-sm text-red-600 mb-3" x-text="voteError"></p>
+            <div x-show="votePending && !hasVotedCurrent" class="text-center text-indigo-600 py-6 font-medium">Enviando voto...</div>
+            <template x-if="!hasVotedCurrent && !votePending">
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                 <template x-for="a in authors" :key="a.id">
                   <button @click="vote(a.id)"
@@ -628,6 +634,11 @@
         playerJoined: false,
         hasVotedCurrent: false,
         lastVoteResult: null,
+        votePending: false,
+        voteError: '',
+        connected: false,
+        totalPlayers: 0,
+        uploadStatus: '',
 
         init() {
           // Load player data from localStorage
@@ -643,7 +654,13 @@
           // Connect socket
           this.socket = io({ transports: ['websocket', 'polling'] });
 
+          this.socket.on('disconnect', () => { this.connected = false; });
+          this.socket.on('join_error', (d) => {
+            this.playerJoined = false;
+            this.voteError = d.error || 'Nombre no válido';
+          });
           this.socket.on('connect', () => {
+            this.connected = true;
             console.log('Socket connected');
             if (this.playerJoined) {
               this.socket.emit('join', { playerId: this.playerId, name: this.playerName });
@@ -665,7 +682,13 @@
             }
 
             // Only reset vote status when the photo actually changes (not on reconnect)
-            if (data.state === 'playing' && data.currentPhotoId !== prevPhotoId && prevPhotoId !== null) {
+            if (data.currentPhotoId !== prevPhotoId && prevPhotoId !== null) {
+              this.hasVotedCurrent = false;
+              this.lastVoteResult = null;
+              this.votePending = false;
+              this.voteError = '';
+            }
+            if (data.state === 'lobby') {
               this.hasVotedCurrent = false;
               this.lastVoteResult = null;
             }
@@ -673,9 +696,14 @@
 
           // Server tells us if we already voted for the current photo (on join/reconnect)
           this.socket.on('vote_status', (data) => {
+            if (data.photoId !== this.currentPhotoId && this.currentPhotoId !== null) return;
             if (data.hasVoted) {
               this.hasVotedCurrent = true;
+              this.votePending = false;
+            } else if (!this.votePending) {
+              this.hasVotedCurrent = false;
             }
+            if (data.result) this.lastVoteResult = data.result;
           });
 
           this.socket.on('players_update', (data) => {
@@ -690,6 +718,7 @@
           this.socket.on('vote_count', (data) => {
             this.voteCounts = data.counts;
             this.totalVoters = data.totalVoters;
+            if (typeof data.totalPlayers === 'number') this.totalPlayers = data.totalPlayers;
           });
 
           this.socket.on('revealed', (data) => {
@@ -805,10 +834,35 @@
           this.socket.emit('join', { playerId: this.playerId, name: this.playerName });
         },
 
-        vote(authorId) {
-          if (this.hasVotedCurrent) return;
-          this.hasVotedCurrent = true;
-          this.socket.emit('vote', { playerId: this.playerId, authorId });
+        // Vote with server acknowledgement; retries while the connection recovers.
+        vote(authorId, attempt = 0) {
+          if (this.hasVotedCurrent || (this.votePending && attempt === 0)) return;
+          const photoId = this.currentPhotoId;
+          this.votePending = true;
+          this.voteError = '';
+          this.socket.timeout(4000).emit('vote', { playerId: this.playerId, authorId, photoId }, (err, res) => {
+            if (photoId !== this.currentPhotoId) { this.votePending = false; return; }
+            if (!err && res && res.ok) {
+              this.votePending = false;
+              this.hasVotedCurrent = true;
+              return;
+            }
+            if (!err && res && res.reason === 'closed') {
+              this.votePending = false;
+              this.voteError = 'La votación de esta foto ya se cerró';
+              return;
+            }
+            if (!err && res && res.reason === 'not_joined' && attempt < 5) {
+              this.socket.emit('join', { playerId: this.playerId, name: this.playerName });
+            }
+            if (attempt < 5) {
+              this.voteError = 'Conexión lenta, reintentando...';
+              setTimeout(() => this.vote(authorId, attempt + 1), 1000);
+            } else {
+              this.votePending = false;
+              this.voteError = 'No se pudo enviar el voto. Comprueba tu conexión y vuelve a pulsar.';
+            }
+          });
         },
 
         // --- Admin actions ---
@@ -828,25 +882,42 @@
           if (!confirm('¿Eliminar este autor y todas sus fotos?')) return;
           const res = await this.adminFetch(`/api/authors/${id}`, { method: 'DELETE' });
           if (!res) return;
+          if (!res.ok) { try { alert((await res.json()).error); } catch { alert('Error al borrar'); } }
           this.fetchState();
         },
 
         async uploadPhotos(event, authorId) {
-          const files = event.target.files;
-          for (const file of files) {
+          const files = [...event.target.files];
+          const errors = [];
+          let ok = 0;
+          for (const [i, file] of files.entries()) {
+            this.uploadStatus = `Subiendo ${i + 1}/${files.length}: ${file.name}`;
             const formData = new FormData();
             formData.append('photo', file);
             formData.append('author_id', authorId);
-            const res = await this.adminFetch('/api/upload', { method: 'POST', body: formData });
-            if (!res) return;
+            try {
+              const res = await this.adminFetch('/api/upload', { method: 'POST', body: formData });
+              if (!res) { errors.push(`${file.name}: sesión expirada`); break; }
+              if (res.ok) { ok++; continue; }
+              // Gateway errors (413 from proxy, 502...) may not be JSON
+              let msg = `HTTP ${res.status}`;
+              try { const j = await res.json(); if (j.error) msg = j.error; } catch {}
+              if (res.status === 413 && msg === 'HTTP 413') msg = 'Foto demasiado grande (rechazada por el proxy)';
+              errors.push(`${file.name}: ${msg}`);
+            } catch (e) {
+              errors.push(`${file.name}: error de red`);
+            }
           }
           event.target.value = '';
+          this.uploadStatus = `${ok}/${files.length} fotos subidas` + (errors.length ? ` — ${errors.length} con error` : '');
+          if (errors.length) alert('Algunas fotos no se subieron:\n\n' + errors.join('\n'));
           this.fetchState();
         },
 
         async deletePhoto(id) {
           const res = await this.adminFetch(`/api/photo/${id}`, { method: 'DELETE' });
           if (!res) return;
+          if (!res.ok) { try { alert((await res.json()).error); } catch { alert('Error al borrar'); } }
           this.fetchState();
         },
 

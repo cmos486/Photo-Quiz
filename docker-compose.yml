@@ -12,3 +12,5 @@ services:
       - NODE_ENV=production
       - PORT=3001
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-photoquiz}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-14}
+      - TRUST_PROXY=${TRUST_PROXY:-loopback, linklocal, uniquelocal}

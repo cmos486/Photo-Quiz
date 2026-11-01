@@ -108,7 +108,10 @@ server {
     location /api/ {
         proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
-        client_max_body_size 10M;
+        client_max_body_size 15M;   # backend acepta 14MB (MAX_UPLOAD_MB)
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     # Socket.io al contenedor
@@ -118,7 +121,10 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
     }
 
     location / {
@@ -145,6 +151,30 @@ docker compose up -d
 ### 6. Configurar la URL pública
 
 Accede al panel Admin (`http://TU_IP/?view=admin`) y configura la URL pública del juego (la que aparecerá en el QR de la TV).
+
+## Producción detrás de un proxy inverso
+
+Cadena típica: `móvil → proxy inverso / WAF → [nginx host opcional] → contenedor :3001`.
+
+- **El frontend va dentro de la imagen** (`COPY index.html ./public/`). Tras cambiar `index.html` o `server.js`:
+  `docker compose up -d --build` (y si nginx sirve `/var/www/quiz`, copiar también `index.html` allí).
+- **IP real del cliente**: Express usa `trust proxy = loopback, linklocal, uniquelocal` (todos los saltos
+  internos son IPs privadas). Comprobar con `curl -H "X-Admin-Token: $T" https://<dominio>/api/admin/whoami`:
+  `ip` debe ser tu IP pública, nunca la del proxy, nginx o `172.x` de docker.
+- **Tamaños**: backend 14MB (`MAX_UPLOAD_MB`), nginx 15M, proxy inverso ≥ 16MB.
+- **WebSocket**: socket.io hace ping cada 25s, así que cualquier idle timeout del proxy ≥ 60s basta;
+  aun así se recomienda desactivarlo/alargarlo para `/socket.io/`.
+- **Purga automática**: desactivada por defecto (0). Si está activa, el arranque lo anuncia en el log y
+  nunca purga con una partida en curso.
+
+### Ensayo general
+
+```bash
+# Contra un servidor vacío (aborta si hay fotos o partida en curso, salvo --force)
+ADMIN_PASSWORD=xxx node rehearsal.js https://<tu-dominio> --players 18 --photos 6 --cleanup
+# Con reinicio del contenedor a mitad de partida (el script pausa tras la foto 2)
+ADMIN_PASSWORD=xxx node rehearsal.js https://<tu-dominio> --players 18 --photos 4 --restart-at 2 --cleanup
+```
 
 ## Comandos de gestión
 

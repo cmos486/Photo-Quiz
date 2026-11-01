@@ -10,6 +10,11 @@ const { v4: uuidv4 } = require('uuid');
 
 const PORT = process.env.PORT || 3001;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'photoquiz';
+const MAX_UPLOAD_MB = parseInt(process.env.MAX_UPLOAD_MB, 10) || 14;
+// Proxies in front of Express (reverse proxy / load balancer, optional host nginx, docker bridge) live on
+// private/loopback ranges. Trusting those ranges makes req.ip = first public hop in X-Forwarded-For.
+// Override with TRUST_PROXY (e.g. "1", "2", or a comma list of IPs/CIDRs) if topology changes.
+const TRUST_PROXY = process.env.TRUST_PROXY || 'loopback, linklocal, uniquelocal';
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim())
   : null; // null = allow all
@@ -92,8 +97,18 @@ try {
   db.exec('ALTER TABLE session ADD COLUMN auto_purge_days INTEGER DEFAULT 0');
 }
 
+// Migration: archived flag (prevents archiving the same game twice, e.g. finish + reset)
+try {
+  db.prepare('SELECT archived FROM session LIMIT 1').get();
+} catch {
+  db.exec('ALTER TABLE session ADD COLUMN archived INTEGER DEFAULT 0');
+}
+
 // --- Helper: archive current game to history ---
 function archiveGame() {
+  const flag = db.prepare('SELECT archived FROM session WHERE id = 1').get();
+  if (flag && flag.archived) return null;
+
   const players = db.prepare('SELECT * FROM players ORDER BY score DESC, name').all();
   const photos = db.prepare('SELECT * FROM photos').all();
 
@@ -125,6 +140,7 @@ function archiveGame() {
 
       insertPlayer.run(gameId, player.name, player.score, correctVotes, totalVotes, index + 1);
     });
+    db.prepare('UPDATE session SET archived = 1 WHERE id = 1').run();
 
     return gameId;
   });
@@ -176,11 +192,21 @@ function checkAutoPurge() {
     const now = new Date();
     const diffDays = (now - createdAt) / (1000 * 60 * 60 * 24);
     if (diffDays >= session.auto_purge_days) {
-      console.log(`[Auto-purge] Data is ${Math.floor(diffDays)} days old (limit: ${session.auto_purge_days}). Purging...`);
+      const st = db.prepare('SELECT state FROM session WHERE id = 1').get().state;
+      if (st === 'playing' || st === 'revealed') {
+        console.warn(`[Auto-purge] SKIPPED: data is ${Math.floor(diffDays)} days old but a game is in progress (state=${st}).`);
+        return;
+      }
+      const counts = db.prepare('SELECT (SELECT COUNT(*) FROM photos) p, (SELECT COUNT(*) FROM authors) a, (SELECT COUNT(*) FROM players) pl').get();
+      console.warn(`[Auto-purge] *** ABOUT TO DELETE ALL GAME DATA *** age=${Math.floor(diffDays)}d limit=${session.auto_purge_days}d -> ${counts.p} photos, ${counts.a} authors, ${counts.pl} players (history kept). Disable in Admin > Ajustes.`);
       purgeAllData();
       db.prepare('UPDATE session SET created_at = CURRENT_TIMESTAMP WHERE id = 1').run();
     }
   }
+}
+{
+  const ap = db.prepare('SELECT auto_purge_days FROM session WHERE id = 1').get().auto_purge_days;
+  console.log(ap > 0 ? `[Auto-purge] ENABLED: data older than ${ap} days will be deleted (checked hourly)` : '[Auto-purge] disabled');
 }
 checkAutoPurge(); // Run on startup
 setInterval(checkAutoPurge, 60 * 60 * 1000); // Check every hour
@@ -221,6 +247,7 @@ const stmts = {
 
 // --- Express + Socket.io ---
 const app = express();
+app.set('trust proxy', TRUST_PROXY);
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: ALLOWED_ORIGINS || '*' },
@@ -311,7 +338,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024, files: 1 },
   fileFilter: (req, file, cb) => {
     const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -360,6 +387,14 @@ function getFullState() {
   };
 }
 
+// Expected voters for the current photo = joined players online now ∪ players who already voted.
+// (Using every player ever registered made the TV show phantom missing votes.)
+function expectedVoters(votes) {
+  const ids = new Set(connectedPlayers.keys());
+  for (const v of votes) ids.add(v.player_id);
+  return ids.size;
+}
+
 // --- Helper: broadcast state ---
 function broadcastState() {
   const state = getFullState();
@@ -379,7 +414,7 @@ function broadcastState() {
       photoId: state.currentPhoto.id,
       counts: state.voteCounts,
       totalVoters: state.totalVoters,
-      totalPlayers: state.players.length,
+      totalPlayers: expectedVoters(stmts.getVotesForPhoto.all(state.currentPhoto.id)),
     });
   }
 }
@@ -402,6 +437,18 @@ app.get('/api/admin/verify', (req, res) => {
   res.json({ valid: !!(token && adminTokens.has(token)) });
 });
 
+// Admin: show how the server sees the client IP (validates trust proxy / X-Forwarded-For)
+app.get('/api/admin/whoami', requireAdmin, (req, res) => {
+  res.json({
+    ip: req.ip,
+    ips: req.ips,
+    xForwardedFor: req.headers['x-forwarded-for'] || null,
+    xRealIp: req.headers['x-real-ip'] || null,
+    socketRemote: req.socket.remoteAddress,
+    trustProxy: TRUST_PROXY,
+  });
+});
+
 // Public: get state (players/TV need this without auth)
 app.get('/api/state', (req, res) => {
   const state = getFullState();
@@ -411,12 +458,21 @@ app.get('/api/state', (req, res) => {
 // ---- All routes below require admin auth ----
 
 // Upload photo
-app.post('/api/upload', requireAdmin, upload.single('photo'), (req, res) => {
+function uploadSingle(req, res, next) {
+  upload.single('photo')(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: `La foto supera ${MAX_UPLOAD_MB} MB` });
+    return res.status(400).json({ error: err.message || 'Subida no válida' });
+  });
+}
+
+app.post('/api/upload', requireAdmin, uploadSingle, (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No se envió foto' });
-  const authorId = req.body.author_id;
-  if (!authorId) {
+  const authorId = parseInt(req.body.author_id, 10);
+  const author = Number.isInteger(authorId) ? db.prepare('SELECT id FROM authors WHERE id = ?').get(authorId) : null;
+  if (!author) {
     try { fs.unlinkSync(req.file.path); } catch {}
-    return res.status(400).json({ error: 'Falta author_id' });
+    return res.status(400).json({ error: 'Autor no válido' });
   }
   const maxOrder = db.prepare('SELECT MAX(display_order) as m FROM photos').get();
   const order = (maxOrder.m || 0) + 1;
@@ -427,6 +483,7 @@ app.post('/api/upload', requireAdmin, upload.single('photo'), (req, res) => {
 
 // Delete photo
 app.delete('/api/photo/:id', requireAdmin, (req, res) => {
+  if (stmts.getSession.get().state !== 'lobby') return res.status(409).json({ error: 'No se puede borrar durante la partida. Resetea primero.' });
   const photo = stmts.getPhotoById.get(req.params.id);
   if (!photo) return res.status(404).json({ error: 'Foto no encontrada' });
   const filepath = path.join(__dirname, 'photos', photo.filename);
@@ -447,6 +504,7 @@ app.post('/api/authors', requireAdmin, (req, res) => {
 
 // Delete author (cascade deletes photos)
 app.delete('/api/authors/:id', requireAdmin, (req, res) => {
+  if (stmts.getSession.get().state !== 'lobby') return res.status(409).json({ error: 'No se puede borrar durante la partida. Resetea primero.' });
   const photos = stmts.getPhotosByAuthor.all(req.params.id);
   for (const photo of photos) {
     const filepath = path.join(__dirname, 'photos', photo.filename);
@@ -480,6 +538,7 @@ app.post('/api/game/start', requireAdmin, (req, res) => {
   stmts.deleteAllVotes.run();
 
   stmts.updatePhotoIndex.run(0);
+  db.prepare('UPDATE session SET archived = 0 WHERE id = 1').run();
   stmts.updateState.run('playing');
   broadcastState();
   res.json({ ok: true, totalPhotos: shuffled.length });
@@ -515,14 +574,12 @@ app.post('/api/game/reveal', requireAdmin, (req, res) => {
   // Send individual results to each voter
   for (const vote of votes) {
     const correct = vote.voted_for_author_id === currentPhoto.author_id;
-    const playerSocket = [...io.sockets.sockets.values()].find(s => s.playerId === vote.player_id);
-    if (playerSocket) {
-      playerSocket.emit('vote_result', {
-        correct,
-        points: correct ? 3 : 0,
-        authorName: author ? author.name : 'Desconocido',
-      });
-    }
+    io.to(`player:${vote.player_id}`).emit('vote_result', {
+      photoId: currentPhoto.id,
+      correct,
+      points: correct ? 3 : 0,
+      authorName: author ? author.name : 'Desconocido',
+    });
   }
 
   io.emit('revealed', {
@@ -643,6 +700,13 @@ app.get('*', (req, res) => {
 });
 
 // --- Socket.io ---
+function removeConnection(socket) {
+  const set = connectedPlayers.get(socket.playerId);
+  if (!set) return;
+  set.delete(socket.id);
+  if (set.size === 0) connectedPlayers.delete(socket.playerId);
+}
+
 function isValidPlayerId(id) {
   return typeof id === 'string' && id.length > 0 && id.length <= 64;
 }
@@ -653,7 +717,7 @@ function safeHandler(name, fn) {
   };
 }
 
-const connectedPlayers = new Map(); // playerId -> socketId
+const connectedPlayers = new Map(); // playerId -> Set<socketId> (a player may have several tabs)
 
 io.on('connection', (socket) => {
   console.log(`Socket conectado: ${socket.id}`);
@@ -674,45 +738,61 @@ io.on('connection', (socket) => {
     const { playerId, name } = payload || {};
     if (!isValidPlayerId(playerId) || typeof name !== 'string') return;
     const safeName = sanitize(name, 30);
-    if (!safeName) return;
+    if (!safeName) { socket.emit('join_error', { error: 'Nombre no válido' }); return; }
+    if (socket.playerId && socket.playerId !== playerId) removeConnection(socket);
     socket.playerId = playerId;
-    connectedPlayers.set(playerId, socket.id);
+    socket.join(`player:${playerId}`);
+    if (!connectedPlayers.has(playerId)) connectedPlayers.set(playerId, new Set());
+    connectedPlayers.get(playerId).add(socket.id);
     stmts.upsertPlayer.run(playerId, safeName);
+    socket.emit('joined', { playerId, name: safeName });
 
-    // Tell the player if they already voted for the current photo
+    // Tell the player if they already voted for the current photo, and the result if revealed
     const session = stmts.getSession.get();
     const photos = stmts.getPhotos.all();
     const currentPhoto = photos[session.current_photo_index];
     if (currentPhoto) {
-      const existingVote = stmts.hasVoted.get(playerId, currentPhoto.id);
+      const existingVote = db.prepare('SELECT * FROM votes WHERE player_id = ? AND photo_id = ?').get(playerId, currentPhoto.id);
+      let result = null;
+      if (existingVote && session.state === 'revealed') {
+        const author = db.prepare('SELECT name FROM authors WHERE id = ?').get(currentPhoto.author_id);
+        const correct = existingVote.voted_for_author_id === currentPhoto.author_id;
+        result = { photoId: currentPhoto.id, correct, points: correct ? 3 : 0, authorName: author ? author.name : 'Desconocido' };
+      }
       socket.emit('vote_status', {
         photoId: currentPhoto.id,
         hasVoted: !!existingVote,
+        result,
       });
     }
 
     broadcastState();
   }));
 
-  socket.on('vote', safeHandler('vote', (payload) => {
-    const { playerId, authorId } = payload || {};
-    if (!isValidPlayerId(playerId) || !Number.isInteger(authorId)) return;
+  socket.on('vote', safeHandler('vote', (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const { playerId, authorId, photoId } = payload || {};
+    if (!isValidPlayerId(playerId) || !Number.isInteger(authorId)) return reply({ ok: false, reason: 'invalid' });
     // Socket must have joined, and can only vote with its own playerId
-    if (!socket.playerId || socket.playerId !== playerId) return;
+    if (!socket.playerId || socket.playerId !== playerId) return reply({ ok: false, reason: 'not_joined' });
 
     const session = stmts.getSession.get();
-    if (session.state !== 'playing') return;
+    if (session.state !== 'playing') return reply({ ok: false, reason: 'closed' });
 
     const photos = stmts.getPhotos.all();
     const currentPhoto = photos[session.current_photo_index];
-    if (!currentPhoto) return;
+    if (!currentPhoto) return reply({ ok: false, reason: 'closed' });
+    // Vote was meant for a previous photo (e.g. retried after reconnect): reject, don't misassign
+    if (photoId !== undefined && photoId !== currentPhoto.id) return reply({ ok: false, reason: 'closed' });
+    if (!db.prepare('SELECT id FROM authors WHERE id = ?').get(authorId)) return reply({ ok: false, reason: 'invalid' });
 
-    // Check if already voted
+    // Already voted: idempotent success (safe for client retries)
     const existing = stmts.hasVoted.get(playerId, currentPhoto.id);
-    if (existing) return;
+    if (existing) return reply({ ok: true, photoId: currentPhoto.id, duplicate: true });
 
     const isCorrect = currentPhoto.author_id === authorId ? 1 : 0;
     stmts.addVote.run(playerId, currentPhoto.id, authorId, isCorrect, 0); // Points assigned on reveal
+    reply({ ok: true, photoId: currentPhoto.id });
 
     // Broadcast updated vote counts
     const votes = stmts.getVotesForPhoto.all(currentPhoto.id);
@@ -720,20 +800,18 @@ io.on('connection', (socket) => {
     for (const v of votes) {
       counts[v.voted_for_author_id] = (counts[v.voted_for_author_id] || 0) + 1;
     }
-    const players = stmts.getPlayers.all();
     io.emit('vote_count', {
       photoId: currentPhoto.id,
       counts,
       totalVoters: votes.length,
-      totalPlayers: players.length,
+      totalPlayers: expectedVoters(votes),
     });
   }));
 
   socket.on('disconnect', () => {
     console.log(`Socket desconectado: ${socket.id}`);
     if (socket.playerId) {
-      connectedPlayers.delete(socket.playerId);
-      // Don't remove from DB, just update connected status on next players_update
+      removeConnection(socket);
       io.emit('players_online', { online: [...connectedPlayers.keys()] });
     }
   });
