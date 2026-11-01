@@ -395,18 +395,33 @@ function expectedVoters(votes) {
   return ids.size;
 }
 
-// --- Helper: broadcast state ---
-function broadcastState() {
-  const state = getFullState();
-  const online = [...connectedPlayers.keys()];
-  io.emit('state_update', {
+// Name of the current photo's author, only once revealed (never leaks the answer while playing)
+function revealedAuthorName(state) {
+  if (state.session.state !== 'revealed' || !state.currentPhoto) return undefined;
+  const author = state.authors.find(a => a.id === state.currentPhoto.author_id);
+  return author ? author.name : 'Desconocido';
+}
+
+// Single source for the state_update payload. Includes the author list so every client
+// (TV/player that connected before authors existed) always has it up to date.
+function statePayload(state) {
+  return {
     state: state.session.state,
     currentPhotoIndex: state.session.current_photo_index,
     photoUrl: state.currentPhoto ? state.currentPhoto.url : null,
     totalPhotos: state.totalPhotos,
     currentPhotoId: state.currentPhoto ? state.currentPhoto.id : null,
     currentPhotoAuthorId: state.session.state === 'revealed' && state.currentPhoto ? state.currentPhoto.author_id : undefined,
-  });
+    currentPhotoAuthorName: revealedAuthorName(state),
+    authors: state.authors.map(a => ({ id: a.id, name: a.name })),
+  };
+}
+
+// --- Helper: broadcast state ---
+function broadcastState() {
+  const state = getFullState();
+  const online = [...connectedPlayers.keys()];
+  io.emit('state_update', statePayload(state));
   io.emit('players_update', { players: state.players });
   io.emit('players_online', { online });
   if (state.currentPhoto) {
@@ -452,7 +467,7 @@ app.get('/api/admin/whoami', requireAdmin, (req, res) => {
 // Public: get state (players/TV need this without auth)
 app.get('/api/state', (req, res) => {
   const state = getFullState();
-  res.json({ ...state, maxUploadMB: MAX_UPLOAD_MB });
+  res.json({ ...state, currentPhotoAuthorName: revealedAuthorName(state), maxUploadMB: MAX_UPLOAD_MB });
 });
 
 // ---- All routes below require admin auth ----
@@ -727,14 +742,7 @@ io.on('connection', (socket) => {
 
   // Send current state on connect
   const state = getFullState();
-  socket.emit('state_update', {
-    state: state.session.state,
-    currentPhotoIndex: state.session.current_photo_index,
-    photoUrl: state.currentPhoto ? state.currentPhoto.url : null,
-    totalPhotos: state.totalPhotos,
-    currentPhotoId: state.currentPhoto ? state.currentPhoto.id : null,
-    currentPhotoAuthorId: state.session.state === 'revealed' && state.currentPhoto ? state.currentPhoto.author_id : undefined,
-  });
+  socket.emit('state_update', statePayload(state));
   socket.emit('players_update', { players: state.players });
 
   socket.on('join', safeHandler('join', (payload) => {

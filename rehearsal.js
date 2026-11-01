@@ -115,6 +115,13 @@ async function main() {
     process.exit(3);
   }
 
+  // Early client: connects BEFORE authors exist (TV/player opened while the admin sets up).
+  // It must receive the author list via state_update, without reloading.
+  const early = { last: null };
+  early.socket = io(BASE, { transports: ['websocket'], extraHeaders: { 'User-Agent': UA } });
+  early.socket.on('state_update', (d) => { early.last = d; });
+  await sleep(1000);
+
   // --- Authors + photos
   console.log('\n[2] Autores y fotos');
   const authorIds = [];
@@ -135,6 +142,10 @@ async function main() {
     if (r.status === 200) uploaded++; else console.log(`  ! upload ${i} -> ${r.status} ${JSON.stringify(r.json)}`);
   }
   check(uploaded === N_PHOTOS, `${uploaded}/${N_PHOTOS} fotos subidas`);
+  await sleep(500);
+  const earlyAuthors = (early.last && early.last.authors) || [];
+  check(authorIds.every(id => earlyAuthors.some(a => a.id === id)),
+    `cliente conectado antes de crear autores los recibe por state_update (${earlyAuthors.length} autores)`);
 
   // --- Players
   // Roles: some players drop before voting, one drops during reveal, last one tests dup/late votes
@@ -194,6 +205,8 @@ async function main() {
     const rev = await api('POST', '/api/game/reveal');
     check(rev.status === 200, `reveal OK (${rev.json && rev.json.authorName})`);
     await sleep(700);
+    check(early.last && early.last.state === 'revealed' && early.last.currentPhotoAuthorName === rev.json.authorName,
+      'state_update revelado lleva el nombre del autor (TV / jugador sin voto)');
     const late = await players[R_LAST].vote(authorIds[0], photo.id);
     check(late && !late.ok && late.reason === 'closed', 'voto tras revelar rechazado');
     players[R_REVEAL].socket.connect();
@@ -258,6 +271,7 @@ async function main() {
   check(players.every(p => (finalPlayers.find(x => x.player_name === p.name) || {}).score === p.expectedScore), 'puntuación archivada = 3 x aciertos de cada jugador');
 
   players.forEach(p => p.socket.disconnect());
+  early.socket.disconnect();
   if (flag('cleanup')) {
     await api('POST', '/api/admin/purge', { includeHistory: false });
     console.log('  (datos de ensayo purgados; historial conservado)');

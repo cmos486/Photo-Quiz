@@ -677,9 +677,16 @@
             this.totalPhotos = data.totalPhotos;
             this.currentPhotoId = data.currentPhotoId;
 
-            if (data.currentPhotoAuthorId) {
-              const author = this.authors.find(a => a.id === data.currentPhotoAuthorId);
-              this.revealedAuthorName = author ? author.name : '';
+            // Server sends the author list on every state_update: clients that connected
+            // before authors existed get vote buttons / TV bars without reloading.
+            if (Array.isArray(data.authors)) this.authors = data.authors;
+            if (data.state === 'revealed') {
+              if (data.currentPhotoAuthorName) {
+                this.revealedAuthorName = data.currentPhotoAuthorName;
+              } else if (data.currentPhotoAuthorId) {
+                const author = this.authors.find(a => a.id === data.currentPhotoAuthorId);
+                if (author) this.revealedAuthorName = author.name; // never blank out a known name
+              }
             }
 
             // Only reset vote status when the photo actually changes (not on reconnect)
@@ -779,7 +786,7 @@
             }
             if (data.session.state === 'revealed' && data.currentPhoto) {
               const author = this.authors.find(a => a.id === data.currentPhoto.author_id);
-              this.revealedAuthorName = author ? author.name : '';
+              this.revealedAuthorName = data.currentPhotoAuthorName || (author ? author.name : this.revealedAuthorName);
             }
 
             // Load admin settings (needs auth)
