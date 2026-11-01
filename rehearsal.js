@@ -41,8 +41,8 @@ const N_AUTHORS = PPA > 0 ? (N_AUTHORS_OPT || 6) : (N_AUTHORS_OPT || Math.min(N_
 const RESTART_AT = parseInt(opt('restart-at', 0), 10);
 const STAGGER = parseInt(opt('stagger', 100), 10);
 const PASS = process.env.ADMIN_PASSWORD;
-// Real browsers always send a User-Agent; Node's fetch/ws may not. WAFs (e.g. CrowdSec
-// "no-user-agent" rules) ban clients without one, so the simulator must look like a browser.
+// Real browsers always send a User-Agent; Node's fetch/ws may not. Some WAFs have rules that
+// ban clients without one, so the simulator must look like a browser.
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 PhotoQuizRehearsal/1.0';
 
 const failures = [];
