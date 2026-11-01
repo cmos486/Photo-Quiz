@@ -115,10 +115,15 @@ const THEMES = ['none', 'halloween', 'navidad'];
 // (bind-mounted in docker-compose); none are shipped with the repo.
 const AUDIO_DIR = path.join(__dirname, 'audio');
 const THEME_TRACK = { none: 'ambient.mp3', halloween: 'halloween.mp3', navidad: 'navidad.mp3' };
-// URL of the track for a theme, or null if the file is missing (client then requests nothing)
+// URL of the track for a theme: the theme's own MP3 if present, otherwise ambient.mp3 as the
+// common fallback, otherwise null (client then requests nothing).
+function trackExists(file) {
+  try { return fs.statSync(path.join(AUDIO_DIR, file)).isFile(); } catch { return false; }
+}
 function musicUrl(theme) {
-  const file = THEME_TRACK[theme] || THEME_TRACK.none;
-  try { return fs.statSync(path.join(AUDIO_DIR, file)).isFile() ? `/audio/${file}` : null; } catch { return null; }
+  const candidates = [THEME_TRACK[theme] || THEME_TRACK.none, THEME_TRACK.none];
+  const file = candidates.find(trackExists);
+  return file ? `/audio/${file}` : null;
 }
 
 // --- Helper: archive current game to history ---
