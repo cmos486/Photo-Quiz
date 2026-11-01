@@ -14,6 +14,11 @@
  *   --offline N     jugadores a los que se corta la red durante la revelación (default 2)
  *   --cleanup       purga los datos de juego al terminar (conserva historial)
  *   --headed        ver los navegadores (depuración)
+ *   --no-tailwind   bloquea SOLO el CSS de Tailwind CDN en las pestañas de prueba. Tailwind CDN
+ *                   compila CSS en el navegador (varios segundos de CPU por pestaña); con muchas
+ *                   pestañas en una sola máquina las satura entre sí, cosa que no ocurre con
+ *                   móviles reales (cada uno con su CPU). Mantiene index.html, Alpine, socket.io
+ *                   y toda la lógica de UI; solo se pierde el estilo.
  * Requiere: npm install (devDependency playwright) y Google Chrome instalado.
  */
 const fs = require('fs');
@@ -31,6 +36,8 @@ const N_EARLY = Math.min(parseInt(opt('early', 2), 10), N);
 const N_OFFLINE = Math.min(parseInt(opt('offline', 2), 10), Math.max(0, N - 2));
 const PASS = process.env.ADMIN_PASSWORD;
 const UA_API = devices['Pixel 7'].userAgent;
+const NO_TAILWIND = args.includes('--no-tailwind');
+const blockTailwind = ctx => NO_TAILWIND ? ctx.route(/cdn\.tailwindcss\.com/, r => r.abort()) : null;
 
 const failures = [];
 const check = (c, m) => { console.log(`  ${c ? '✓' : '✗'} ${m}`); if (!c) failures.push(m); return c; };
@@ -93,7 +100,9 @@ async function main() {
   const consoleErrors = [];
 
   // --- TV (desktop)
+  if (NO_TAILWIND) console.log('  (--no-tailwind: CSS de Tailwind bloqueado en las pestañas de prueba; lógica de UI intacta)');
   const tvCtx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  await blockTailwind(tvCtx);
   const tv = await tvCtx.newPage();
   tv.on('pageerror', e => consoleErrors.push(`TV: ${e.message}`));
   await tv.goto(`${BASE}/?view=tv`, { waitUntil: 'domcontentloaded' });
@@ -102,6 +111,7 @@ async function main() {
   const players = [];
   async function openPlayer(i) {
     const ctx = await browser.newContext({ ...devices['Pixel 7'] });
+    await blockTailwind(ctx);
     const page = await ctx.newPage();
     const name = `Chrome ${String(i + 1).padStart(2, '0')} ${['📱', 'Ñandú', 'José', 'Zoë'][i % 4]}`;
     const p = { i, ctx, page, name, early: i < N_EARLY, choice: {}, mixedContent: [] };
