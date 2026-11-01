@@ -10,7 +10,7 @@ COPY index.html ./public/index.html
 COPY tailwind.css ./public/tailwind.css
 
 # Crear carpetas de datos y asignar permisos al usuario node
-RUN mkdir -p /app/photos /app/data && chown -R node:node /app/photos /app/data
+RUN mkdir -p /app/photos /app/data /app/audio && chown -R node:node /app/photos /app/data
 
 EXPOSE 3001
 

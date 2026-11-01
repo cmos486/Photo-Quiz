@@ -5,6 +5,9 @@ node_modules/
 data/
 photos/
 
+# Música de la TV (la deja el operador en audio/)
+audio/*.mp3
+
 # Environment
 .env
 

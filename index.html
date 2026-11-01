@@ -18,6 +18,32 @@
     .pulse-anim { animation: pulse 0.5s ease-in-out; }
     .bar-transition { transition: width 0.5s ease-out; }
     .photo-reveal { animation: fadeInUp 0.8s ease-out; }
+
+    /* ===== Temáticas (cosméticas). Solo aplican a las raíces de TV y jugador con
+       data-theme="halloween" | "navidad". Con "none" no se aplica ninguna regla. ===== */
+    .pq-root[data-theme="halloween"], .pq-root[data-theme="navidad"] { position: relative; isolation: isolate; }
+    /* Fondo decorativo: detrás del contenido (z-index -1), solo visible en zonas sin fondo propio */
+    .pq-root[data-theme="halloween"]::before, .pq-root[data-theme="navidad"]::before {
+      content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; background-repeat: repeat;
+    }
+    .pq-root[data-theme="halloween"]::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Ctext x='20' y='60' font-size='34'%3E%F0%9F%8E%83%3C/text%3E%3Ctext x='130' y='120' font-size='30'%3E%F0%9F%A6%87%3C/text%3E%3Ctext x='40' y='190' font-size='28'%3E%F0%9F%95%B8%EF%B8%8F%3C/text%3E%3C/svg%3E"); opacity: .09; }
+    .pq-root[data-theme="navidad"]::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Ctext x='20' y='60' font-size='30'%3E%E2%9D%84%EF%B8%8F%3C/text%3E%3Ctext x='130' y='120' font-size='34'%3E%F0%9F%8E%84%3C/text%3E%3Ctext x='50' y='190' font-size='26'%3E%E2%9C%A8%3C/text%3E%3C/svg%3E"); opacity: .09; }
+    /* TV */
+    .pq-tv[data-theme="halloween"] { background-color: #0d0714; }
+    .pq-tv[data-theme="navidad"] { background-color: #06110b; }
+    .pq-tv[data-theme="halloween"] .pq-panel { background-color: #1c1027; }
+    .pq-tv[data-theme="navidad"] .pq-panel { background-color: #0f2318; }
+    .pq-tv[data-theme="halloween"] .pq-bar { background-color: #f97316; }
+    .pq-tv[data-theme="navidad"] .pq-bar { background-image: linear-gradient(90deg, #dc2626, #16a34a); }
+    .pq-tv[data-theme="halloween"] .pq-reveal { background-image: linear-gradient(90deg, #ea580c, #7c3aed); }
+    .pq-tv[data-theme="navidad"] .pq-reveal { background-image: linear-gradient(90deg, #b91c1c, #15803d); }
+    /* Jugador */
+    .pq-player[data-theme="halloween"] { background-color: #fff7ed; }
+    .pq-player[data-theme="navidad"] { background-color: #f0fdf4; }
+    .pq-player[data-theme="halloween"] .pq-accent-btn { background-color: #c2410c; }
+    .pq-player[data-theme="navidad"] .pq-accent-btn { background-color: #b91c1c; }
+    .pq-player[data-theme="halloween"] .pq-vote-btn:hover { border-color: #f97316; background-color: #ffedd5; }
+    .pq-player[data-theme="navidad"] .pq-vote-btn:hover { border-color: #16a34a; background-color: #dcfce7; }
   </style>
 </head>
 <body class="bg-gray-100 min-h-screen" x-data="app()" x-init="init()" x-cloak>
@@ -45,11 +71,22 @@
 
   <!-- ==================== TV VIEW ==================== -->
   <template x-if="view === 'tv'">
-    <div class="min-h-screen bg-gray-950 text-white">
+    <div class="min-h-screen bg-gray-950 text-white pq-root pq-tv" :data-theme="theme">
+
+      <!-- TV: música de fondo (solo TV; nunca en el móvil). Arranca en pausa: el navegador exige un clic. -->
+      <div class="fixed top-4 left-4 z-50 flex items-center gap-3 bg-black/70 text-white text-base px-4 py-2 rounded-full opacity-70 hover:opacity-100 transition">
+        <button @click="toggleMusic()" :disabled="!musicUrl"
+                class="font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                :title="musicUrl ? '' : 'No hay pista de música en el servidor'"
+                x-text="!musicUrl ? '🎵 Sin música' : (musicPlaying ? '⏸ Pausa' : '🔈 Activar música')"></button>
+        <input type="range" min="0" max="1" step="0.05" x-model.number="musicVolume" @input="setMusicVolume()"
+               x-show="musicUrl" class="w-28 accent-amber-500" aria-label="Volumen">
+        <audio x-ref="music" loop preload="none" @error="musicPlaying = false" @pause="musicPlaying = false" @play="musicPlaying = true"></audio>
+      </div>
 
       <!-- TV: Lobby -->
       <div x-show="gameState === 'lobby'" class="flex flex-col items-center justify-center min-h-screen p-8" x-init="$watch('gameState', v => { if (v === 'lobby') $nextTick(() => renderQR()) })">
-          <h1 class="text-6xl font-bold mb-4">📷 Photo Quiz</h1>
+          <h1 class="text-6xl font-bold mb-4"><span x-show="theme !== 'none'" x-text="themeEmojis[0] + ' '"></span>📷 Photo Quiz<span x-show="theme !== 'none'" x-text="' ' + themeEmojis[1]"></span></h1>
           <p class="text-gray-400 text-2xl mb-8">Esperando jugadores...</p>
           <div class="bg-white p-6 rounded-2xl mb-8">
             <canvas id="qr-canvas"></canvas>
@@ -78,7 +115,7 @@
             </div>
           </div>
           <!-- Vote bars at bottom -->
-          <div class="bg-gray-900 px-6 py-4">
+          <div class="bg-gray-900 px-6 py-4 pq-panel">
             <div class="max-w-4xl mx-auto">
               <div class="text-center text-sm text-gray-400 mb-3">
                 <span x-text="totalVoters"></span>/<span x-text="totalPlayers"></span> votos recibidos
@@ -91,7 +128,7 @@
                       <span class="ml-2" x-text="(voteCounts[a.id] || 0)"></span>
                     </div>
                     <div class="bg-gray-800 rounded-full h-5 overflow-hidden">
-                      <div class="bg-indigo-500 h-full bar-transition rounded-full"
+                      <div class="bg-indigo-500 h-full bar-transition rounded-full pq-bar"
                            :style="'width: ' + (totalVoters > 0 ? ((voteCounts[a.id] || 0) / totalVoters * 100) : 0) + '%'">
                       </div>
                     </div>
@@ -112,12 +149,12 @@
             <div class="absolute top-4 right-6 text-gray-400 text-sm bg-black/60 px-3 py-1 rounded-full">
               Foto <span x-text="currentPhotoIndex + 1"></span> / <span x-text="totalPhotos"></span>
             </div>
-            <div class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-gradient-to-r from-amber-500 to-orange-500 px-8 py-3 rounded-2xl photo-reveal shadow-2xl">
-              <div class="text-2xl font-bold text-center" x-text="'📸 ' + revealedAuthorName"></div>
+            <div class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-gradient-to-r from-amber-500 to-orange-500 px-8 py-3 rounded-2xl photo-reveal shadow-2xl pq-reveal">
+              <div class="text-2xl font-bold text-center" x-text="'📸 ' + revealedAuthorName + (theme !== 'none' ? ' ' + themeEmojis[0] : '')"></div>
             </div>
           </div>
           <!-- Ranking at bottom -->
-          <div class="bg-gray-900 px-6 py-4">
+          <div class="bg-gray-900 px-6 py-4 pq-panel">
             <div class="max-w-4xl mx-auto">
               <h3 class="text-center text-lg font-bold mb-3">Ranking</h3>
               <div class="grid gap-2" :style="'grid-template-columns: repeat(' + Math.min(ranking.length, 5) + ', 1fr)'">
@@ -138,7 +175,7 @@
       <!-- TV: Finished -->
       <template x-if="gameState === 'finished'">
         <div class="flex flex-col items-center justify-center min-h-screen p-8">
-          <h1 class="text-5xl font-bold mb-8 fade-in-up">🏆 Resultados Finales</h1>
+          <h1 class="text-5xl font-bold mb-8 fade-in-up">🏆 Resultados Finales<span x-show="theme !== 'none'" x-text="' ' + themeEmojis[0] + themeEmojis[1]"></span></h1>
           <div class="w-full max-w-lg space-y-4">
             <template x-for="(p, i) in ranking" :key="p.id">
               <div class="flex items-center gap-4 bg-gray-800 px-6 py-4 rounded-xl fade-in-up"
@@ -408,6 +445,23 @@
           </div>
         </div>
 
+        <!-- Temática visual + música -->
+        <div class="bg-white rounded-xl shadow p-4 mb-4">
+          <h2 class="font-bold text-gray-700 mb-2">Temática visual</h2>
+          <p class="text-xs text-gray-400 mb-3">Decoración de la TV y de los móviles. Se aplica al momento, sin recargar. No afecta al juego.</p>
+          <div class="flex flex-wrap gap-2">
+            <template x-for="opt in [{ v: 'none', label: 'Ninguna' }, { v: 'halloween', label: '🎃 Halloween' }, { v: 'navidad', label: '🎄 Navidad' }]" :key="opt.v">
+              <button @click="saveTheme(opt.v)"
+                      class="px-3 py-1.5 rounded-lg text-sm border transition"
+                      :class="theme === opt.v ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:border-indigo-400'">
+                <span x-text="opt.label"></span>
+              </button>
+            </template>
+          </div>
+          <p class="text-xs mt-3" :class="musicUrl ? 'text-green-600' : 'text-gray-400'"
+             x-text="musicUrl ? ('Música de la TV: ' + musicUrl + ' (se activa con el botón de la propia TV)') : ('Música de la TV: falta audio/' + ({ none: 'ambient', halloween: 'halloween', navidad: 'navidad' })[theme] + '.mp3 en el servidor')"></p>
+        </div>
+
         <!-- Auto-purge -->
         <div class="bg-white rounded-xl shadow p-4 mb-4">
           <h2 class="font-bold text-gray-700 mb-2">Purga automática</h2>
@@ -468,7 +522,8 @@
 
   <!-- ==================== PLAYER VIEW ==================== -->
   <template x-if="view === 'player'">
-    <div class="max-w-3xl mx-auto p-4 sm:p-6 lg:p-8 min-h-screen bg-gray-50">
+    <div class="max-w-3xl mx-auto p-4 sm:p-6 lg:p-8 min-h-screen bg-gray-50 pq-root pq-player" :data-theme="theme">
+      <div x-show="theme !== 'none'" class="text-center text-2xl tracking-widest select-none" aria-hidden="true" x-text="themeEmojis.join(' ')"></div>
 
       <!-- Name entry -->
       <template x-if="!playerJoined">
@@ -480,7 +535,7 @@
                  class="w-full max-w-sm border-2 border-indigo-300 rounded-xl px-4 py-3 sm:py-4 text-lg sm:text-xl text-center mb-4 focus:border-indigo-500 focus:outline-none"
                  @keydown.enter="joinGame()">
           <button @click="joinGame()" :disabled="!playerName.trim()"
-                  class="bg-indigo-600 text-white px-8 py-3 sm:py-4 rounded-xl text-lg sm:text-xl font-medium hover:bg-indigo-700 disabled:opacity-50 transition">
+                  class="pq-accent-btn bg-indigo-600 text-white px-8 py-3 sm:py-4 rounded-xl text-lg sm:text-xl font-medium hover:bg-indigo-700 disabled:opacity-50 transition">
             Entrar
           </button>
         </div>
@@ -526,7 +581,7 @@
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                 <template x-for="a in authors" :key="a.id">
                   <button @click="vote(a.id)"
-                          class="w-full text-left px-4 py-3 sm:py-4 bg-white rounded-xl border-2 border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 transition font-medium sm:text-lg"
+                          class="pq-vote-btn w-full text-left px-4 py-3 sm:py-4 bg-white rounded-xl border-2 border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 transition font-medium sm:text-lg"
                           x-text="a.name">
                   </button>
                 </template>
@@ -642,6 +697,15 @@
         uploadStatus: '',
         maxUploadMB: 5, // fallback; real value comes from the server (/api/state -> MAX_UPLOAD_MB)
 
+        // Temática (cosmética) y música de la TV
+        theme: 'none',
+        musicUrl: null,
+        musicPlaying: false,
+        musicVolume: 0.3,
+        get themeEmojis() {
+          return this.theme === 'halloween' ? ['🎃', '🦇', '🕸️'] : this.theme === 'navidad' ? ['🎄', '❄️', '✨'] : ['', '', ''];
+        },
+
         init() {
           // Load player data from localStorage
           this.playerId = localStorage.getItem('pq_playerId') || this.generateUUID();
@@ -681,6 +745,8 @@
             // Server sends the author list on every state_update: clients that connected
             // before authors existed get vote buttons / TV bars without reloading.
             if (Array.isArray(data.authors)) this.authors = data.authors;
+            if (data.theme) this.theme = data.theme;
+            if ('musicUrl' in data) this.setMusicUrl(data.musicUrl);
             if (data.state === 'revealed') {
               if (data.currentPhotoAuthorName) {
                 this.revealedAuthorName = data.currentPhotoAuthorName;
@@ -775,6 +841,8 @@
             this.players = data.players;
             this.ranking = [...data.players].sort((a, b) => b.score - a.score);
             this.gameUrl = data.session.game_url;
+            if (data.theme) this.theme = data.theme;
+            if ('musicUrl' in data) this.setMusicUrl(data.musicUrl);
             this.gameUrlInput = data.session.game_url;
             this.voteCounts = data.voteCounts;
             this.totalVoters = data.totalVoters;
@@ -981,6 +1049,57 @@
           if (!res) return;
           this.gameHistory = [];
           this.fetchState();
+        },
+
+        // --- Temática / música (TV) ---
+        async saveTheme(theme) {
+          const res = await this.adminFetch('/api/admin/theme', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ theme }),
+          });
+          if (!res) return;
+          if (!res.ok) { try { alert((await res.json()).error); } catch {} return; }
+          this.theme = theme; // state_update también lo trae
+        },
+
+        // Only the TV view has an <audio>; players never play anything.
+        musicEl() {
+          return this.view === 'tv' ? this.$refs.music || null : null;
+        },
+
+        setMusicUrl(url) {
+          if (url === this.musicUrl) return;
+          this.musicUrl = url || null;
+          const a = this.musicEl();
+          if (!a) return;
+          const wasPlaying = !a.paused;
+          a.pause();
+          if (this.musicUrl) {
+            a.src = this.musicUrl;
+            if (wasPlaying) a.play().catch(() => { this.musicPlaying = false; });
+          } else {
+            a.removeAttribute('src');
+            a.load();
+            this.musicPlaying = false;
+          }
+        },
+
+        toggleMusic() {
+          const a = this.musicEl();
+          if (!a || !this.musicUrl) return;
+          if (a.paused) {
+            if (a.getAttribute('src') !== this.musicUrl) a.src = this.musicUrl;
+            a.volume = this.musicVolume;
+            a.play().catch(() => { this.musicPlaying = false; });
+          } else {
+            a.pause();
+          }
+        },
+
+        setMusicVolume() {
+          const a = this.musicEl();
+          if (a) a.volume = this.musicVolume;
         },
 
         async saveAutoPurge(days) {

@@ -8,6 +8,7 @@ services:
     volumes:
       - ./photos:/app/photos
       - ./data:/app/data
+      - ./audio:/app/audio:ro
     environment:
       - NODE_ENV=production
       - PORT=3001

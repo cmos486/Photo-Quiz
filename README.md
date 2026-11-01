@@ -194,6 +194,25 @@ Las clases deben aparecer escritas completas en `index.html` (también dentro de
 construyas concatenando strings o no se incluirán. Si sirves el frontend con nginx desde
 `/var/www/quiz`, copia también `tailwind.css` allí.
 
+## Temática visual y música de la TV
+
+- **Temática** (Admin → Ajustes → *Temática visual*): `Ninguna` (por defecto), `🎃 Halloween`, `🎄 Navidad`.
+  Decora la TV y los móviles (colores de acento, emojis, fondo sutil). Se aplica al instante, sin recargar.
+  Es puramente estética: no toca el juego.
+- **Música (solo TV)**: deja los MP3 en `audio/` del servidor (en producción `/root/photo-quiz/audio/`,
+  montado en el contenedor como `/app/audio`, solo lectura):
+
+  | Temática  | Fichero                 |
+  |-----------|-------------------------|
+  | Ninguna   | `audio/ambient.mp3`     |
+  | Halloween | `audio/halloween.mp3`   |
+  | Navidad   | `audio/navidad.mp3`     |
+
+  No hace falta rebuild ni reinicio. La TV muestra arriba a la izquierda **🔈 Activar música** (el navegador
+  exige un clic antes de sonar), **⏸ Pausa** y un control de volumen (empieza al 30 %). La pista suena en
+  bucle y cambia con la temática. Si falta el fichero, la TV muestra *🎵 Sin música* y no pide nada.
+  Los móviles de los jugadores nunca reproducen audio. Los MP3 no se versionan (`.gitignore`).
+
 ## Comandos de gestión
 
 ```bash

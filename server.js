@@ -104,6 +104,23 @@ try {
   db.exec('ALTER TABLE session ADD COLUMN archived INTEGER DEFAULT 0');
 }
 
+// Migration: visual theme (purely cosmetic)
+try {
+  db.prepare('SELECT theme FROM session LIMIT 1').get();
+} catch {
+  db.exec("ALTER TABLE session ADD COLUMN theme TEXT DEFAULT 'none'");
+}
+const THEMES = ['none', 'halloween', 'navidad'];
+// Background music for the TV view only. MP3s are dropped by the operator in ./audio
+// (bind-mounted in docker-compose); none are shipped with the repo.
+const AUDIO_DIR = path.join(__dirname, 'audio');
+const THEME_TRACK = { none: 'ambient.mp3', halloween: 'halloween.mp3', navidad: 'navidad.mp3' };
+// URL of the track for a theme, or null if the file is missing (client then requests nothing)
+function musicUrl(theme) {
+  const file = THEME_TRACK[theme] || THEME_TRACK.none;
+  try { return fs.statSync(path.join(AUDIO_DIR, file)).isFile() ? `/audio/${file}` : null; } catch { return null; }
+}
+
 // --- Helper: archive current game to history ---
 function archiveGame() {
   const flag = db.prepare('SELECT archived FROM session WHERE id = 1').get();
@@ -328,6 +345,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Static files for photos (fallback — nginx should serve these directly)
 app.use('/photos', express.static(path.join(__dirname, 'photos')));
 
+// Background music (TV). Missing files get a plain 404, never the SPA index.html.
+app.use('/audio', express.static(AUDIO_DIR));
+app.use('/audio', (req, res) => res.status(404).end());
+
 // --- Multer for photo uploads ---
 const storage = multer.diskStorage({
   destination: path.join(__dirname, 'photos'),
@@ -414,6 +435,8 @@ function statePayload(state) {
     currentPhotoAuthorId: state.session.state === 'revealed' && state.currentPhoto ? state.currentPhoto.author_id : undefined,
     currentPhotoAuthorName: revealedAuthorName(state),
     authors: state.authors.map(a => ({ id: a.id, name: a.name })),
+    theme: state.session.theme || 'none',
+    musicUrl: musicUrl(state.session.theme || 'none'),
   };
 }
 
@@ -467,7 +490,8 @@ app.get('/api/admin/whoami', requireAdmin, (req, res) => {
 // Public: get state (players/TV need this without auth)
 app.get('/api/state', (req, res) => {
   const state = getFullState();
-  res.json({ ...state, currentPhotoAuthorName: revealedAuthorName(state), maxUploadMB: MAX_UPLOAD_MB });
+  const theme = state.session.theme || 'none';
+  res.json({ ...state, currentPhotoAuthorName: revealedAuthorName(state), maxUploadMB: MAX_UPLOAD_MB, theme, musicUrl: musicUrl(theme) });
 });
 
 // ---- All routes below require admin auth ----
@@ -674,6 +698,15 @@ app.post('/api/admin/purge', requireAdmin, (req, res) => {
 app.get('/api/admin/auto-purge', requireAdmin, (req, res) => {
   const session = db.prepare('SELECT auto_purge_days FROM session WHERE id = 1').get();
   res.json({ autoPurgeDays: session ? session.auto_purge_days : 0 });
+});
+
+// --- Admin: visual theme (cosmetic; broadcast so TV/players update without reloading)
+app.post('/api/admin/theme', requireAdmin, (req, res) => {
+  const theme = req.body && req.body.theme;
+  if (!THEMES.includes(theme)) return res.status(400).json({ error: `Temática no válida (${THEMES.join(', ')})` });
+  db.prepare('UPDATE session SET theme = ? WHERE id = 1').run(theme);
+  broadcastState();
+  res.json({ ok: true, theme });
 });
 
 app.post('/api/admin/auto-purge', requireAdmin, (req, res) => {
