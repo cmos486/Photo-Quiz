@@ -1,5 +1,28 @@
 # Changelog — rama review-evento
 
+## Identidad del jugador y fusión de duplicados
+
+Contexto: en el evento, quien escaneaba el QR desde la app de la cámara jugaba en una vista de navegador
+efímera; al cambiar de app la vista se cerraba y al volver (ya desde el navegador normal) aparecía como
+un jugador nuevo con el mismo nombre.
+
+- **Identidad persistente en el mismo navegador**: el `playerId` y el nombre se guardan en `localStorage`.
+  Al recargar, o al volver tras cerrar la pestaña o bloquear el móvil, el cliente reconecta automáticamente
+  al MISMO jugador, con su nombre, votos y puntos, sin duplicarlo. Los accesos a `localStorage` y
+  `sessionStorage` van envueltos en try/catch: con el almacenamiento bloqueado el juego funciona igual,
+  pero sin recordar al jugador. Un `playerId` desconocido, o borrado con "Borrar todo", crea un jugador
+  nuevo normal. **Límite**: dos navegadores distintos (vista de cámara y navegador normal) no comparten
+  `localStorage`; ese caso se resuelve fusionando.
+- **Fusionar jugadores desde el panel admin** (`POST /api/admin/players/merge`, con auth de admin): se elige
+  un jugador destino y uno o varios a fusionar, con confirmación previa. Los puntos se suman y los votos
+  pasan al destino. Si dos jugadores votaron la misma foto, queda un solo voto: el del destino o, si el
+  destino no la votó, el del primer fusionado. Los puntos de ese voto descartado no se suman. Los
+  fusionados desaparecen de la lista y del ranking, y TV y móviles se actualizan en vivo.
+- **Los móviles de los jugadores fusionados pasan a ser el destino**: al momento si están conectados, y si
+  vuelven más tarde con su id antiguo, este redirige al destino (tabla `player_aliases`, que se vacía con
+  "Borrar todo"). Así el duplicado no reaparece.
+- `test-identity-merge.js`: prueba en Chrome real de ambos casos, solo contra un servidor local.
+
 ## Temáticas, música y rendimiento (`8f14c0d` … `8990325`)
 
 ### Funcional

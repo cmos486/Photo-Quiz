@@ -110,6 +110,12 @@ try {
 } catch {
   db.exec("ALTER TABLE session ADD COLUMN theme TEXT DEFAULT 'none'");
 }
+// Merged players: a browser that still holds a merged (deleted) playerId is redirected to
+// the player it was merged into, so the duplicate never comes back on reconnect.
+db.exec(`CREATE TABLE IF NOT EXISTS player_aliases (
+  old_id TEXT PRIMARY KEY,
+  target_id TEXT NOT NULL
+)`);
 const THEMES = ['none', 'halloween', 'navidad'];
 // Background music for the TV view only. MP3s are dropped by the operator in ./audio
 // (bind-mounted in docker-compose); none are shipped with the repo.
@@ -196,6 +202,7 @@ function purgeAllData(includeHistory = false) {
     db.prepare('DELETE FROM photos').run();
     db.prepare('DELETE FROM authors').run();
     db.prepare('DELETE FROM players').run();
+    db.prepare('DELETE FROM player_aliases').run();
     db.prepare('UPDATE session SET state = ?, current_photo_index = 0 WHERE id = 1').run('lobby');
     if (includeHistory) {
       db.prepare('DELETE FROM game_history_players').run();
@@ -751,6 +758,81 @@ app.delete('/api/admin/history', requireAdmin, (req, res) => {
 });
 
 // Catch-all: serve index.html for SPA routing (local/Docker-only mode)
+// --- Admin: merge duplicate players (e.g. same person joined from two browsers) ---
+// Votes of the merged players move to the target; when target and a merged player voted
+// the same photo, the target's vote is kept (otherwise the first merged player's), and the
+// points of the discarded vote are not added. Merged players disappear; their old ids
+// become aliases of the target so their browsers reconnect as the target.
+function mergePlayers(targetId, sourceIds) {
+  const getPlayer = db.prepare('SELECT * FROM players WHERE id = ?');
+  return db.transaction(() => {
+    const target = getPlayer.get(targetId);
+    if (!target) throw Object.assign(new Error('El jugador destino no existe'), { status: 400 });
+    const sources = sourceIds.map(id => getPlayer.get(id));
+    if (sources.some(p => !p)) throw Object.assign(new Error('Algún jugador a fusionar no existe'), { status: 400 });
+
+    let score = target.score;
+    let movedVotes = 0;
+    let droppedVotes = 0;
+    for (const src of sources) {
+      score += src.score;
+      for (const v of db.prepare('SELECT * FROM votes WHERE player_id = ?').all(src.id)) {
+        if (stmts.hasVoted.get(targetId, v.photo_id)) {
+          db.prepare('DELETE FROM votes WHERE id = ?').run(v.id);
+          score -= v.points; // that photo already counts once for the target
+          droppedVotes++;
+        } else {
+          db.prepare('UPDATE votes SET player_id = ? WHERE id = ?').run(targetId, v.id);
+          movedVotes++;
+        }
+      }
+      db.prepare('DELETE FROM players WHERE id = ?').run(src.id);
+      db.prepare('UPDATE player_aliases SET target_id = ? WHERE target_id = ?').run(targetId, src.id);
+      db.prepare('INSERT OR REPLACE INTO player_aliases (old_id, target_id) VALUES (?, ?)').run(src.id, targetId);
+    }
+    db.prepare('UPDATE players SET score = ? WHERE id = ?').run(Math.max(0, score), targetId);
+    return { target: getPlayer.get(targetId), movedVotes, droppedVotes };
+  })();
+}
+
+app.post('/api/admin/players/merge', requireAdmin, (req, res) => {
+  const { targetId, sourceIds } = req.body || {};
+  if (!isValidPlayerId(targetId) || !Array.isArray(sourceIds) || sourceIds.length === 0 || sourceIds.length > 50
+      || !sourceIds.every(isValidPlayerId)) {
+    return res.status(400).json({ error: 'Selecciona un jugador destino y al menos uno a fusionar' });
+  }
+  const unique = [...new Set(sourceIds)];
+  if (unique.includes(targetId)) return res.status(400).json({ error: 'El destino no puede fusionarse consigo mismo' });
+
+  let result;
+  try { result = mergePlayers(targetId, unique); }
+  catch (err) { return res.status(err.status || 500).json({ error: err.status ? err.message : 'Error al fusionar' }); }
+
+  // Live sockets of merged players now act as the target (same room, same online entry)
+  for (const srcId of unique) {
+    const set = connectedPlayers.get(srcId);
+    connectedPlayers.delete(srcId);
+    for (const sid of set || []) {
+      const s = io.sockets.sockets.get(sid);
+      if (!s) continue;
+      s.leave(`player:${srcId}`);
+      s.playerId = targetId;
+      s.join(`player:${targetId}`);
+      if (!connectedPlayers.has(targetId)) connectedPlayers.set(targetId, new Set());
+      connectedPlayers.get(targetId).add(sid);
+      s.emit('joined', { playerId: targetId, name: result.target.name });
+    }
+  }
+  // Everyone playing as the target re-learns whether they've voted the current photo
+  for (const sid of connectedPlayers.get(targetId) || []) {
+    const s = io.sockets.sockets.get(sid);
+    if (s) sendVoteStatus(s, targetId);
+  }
+  console.log(`[Merge] ${unique.length} player(s) merged into ${result.target.name}: ${result.movedVotes} votes moved, ${result.droppedVotes} duplicate(s) dropped`);
+  broadcastState();
+  res.json({ ok: true, player: result.target, movedVotes: result.movedVotes, droppedVotes: result.droppedVotes });
+});
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -773,6 +855,22 @@ function safeHandler(name, fn) {
   };
 }
 
+// Tell a player's socket if it already voted for the current photo, and the result if revealed
+function sendVoteStatus(socket, playerId) {
+  const session = stmts.getSession.get();
+  const photos = stmts.getPhotos.all();
+  const currentPhoto = photos[session.current_photo_index];
+  if (!currentPhoto) return;
+  const existingVote = db.prepare('SELECT * FROM votes WHERE player_id = ? AND photo_id = ?').get(playerId, currentPhoto.id);
+  let result = null;
+  if (existingVote && session.state === 'revealed') {
+    const author = db.prepare('SELECT name FROM authors WHERE id = ?').get(currentPhoto.author_id);
+    const correct = existingVote.voted_for_author_id === currentPhoto.author_id;
+    result = { photoId: currentPhoto.id, correct, points: correct ? 3 : 0, authorName: author ? author.name : 'Desconocido' };
+  }
+  socket.emit('vote_status', { photoId: currentPhoto.id, hasVoted: !!existingVote, result });
+}
+
 const connectedPlayers = new Map(); // playerId -> Set<socketId> (a player may have several tabs)
 
 io.on('connection', (socket) => {
@@ -788,33 +886,29 @@ io.on('connection', (socket) => {
     if (!isValidPlayerId(playerId) || typeof name !== 'string') return;
     const safeName = sanitize(name, 30);
     if (!safeName) { socket.emit('join_error', { error: 'Nombre no válido' }); return; }
-    if (socket.playerId && socket.playerId !== playerId) removeConnection(socket);
-    socket.playerId = playerId;
-    socket.join(`player:${playerId}`);
-    if (!connectedPlayers.has(playerId)) connectedPlayers.set(playerId, new Set());
-    connectedPlayers.get(playerId).add(socket.id);
-    stmts.upsertPlayer.run(playerId, safeName);
-    socket.emit('joined', { playerId, name: safeName });
 
-    // Tell the player if they already voted for the current photo, and the result if revealed
-    const session = stmts.getSession.get();
-    const photos = stmts.getPhotos.all();
-    const currentPhoto = photos[session.current_photo_index];
-    if (currentPhoto) {
-      const existingVote = db.prepare('SELECT * FROM votes WHERE player_id = ? AND photo_id = ?').get(playerId, currentPhoto.id);
-      let result = null;
-      if (existingVote && session.state === 'revealed') {
-        const author = db.prepare('SELECT name FROM authors WHERE id = ?').get(currentPhoto.author_id);
-        const correct = existingVote.voted_for_author_id === currentPhoto.author_id;
-        result = { photoId: currentPhoto.id, correct, points: correct ? 3 : 0, authorName: author ? author.name : 'Desconocido' };
-      }
-      socket.emit('vote_status', {
-        photoId: currentPhoto.id,
-        hasVoted: !!existingVote,
-        result,
-      });
+    // Identity: a playerId that exists in the current game reconnects to that player (name,
+    // votes and points kept). An id that was merged into another player reconnects as that
+    // player. Any other id (unknown, or wiped by a purge) simply starts a new player.
+    let finalId = playerId;
+    let finalName = safeName;
+    const alias = db.prepare('SELECT target_id FROM player_aliases WHERE old_id = ?').get(playerId);
+    const aliasTarget = alias && db.prepare('SELECT * FROM players WHERE id = ?').get(alias.target_id);
+    if (aliasTarget) { finalId = aliasTarget.id; finalName = aliasTarget.name; }
+
+    if (socket.playerId && socket.playerId !== finalId) {
+      removeConnection(socket);
+      socket.leave(`player:${socket.playerId}`);
     }
+    socket.playerId = finalId;
+    socket.join(`player:${finalId}`);
+    if (!connectedPlayers.has(finalId)) connectedPlayers.set(finalId, new Set());
+    connectedPlayers.get(finalId).add(socket.id);
+    if (aliasTarget) stmts.updatePlayerSeen.run(finalId);
+    else stmts.upsertPlayer.run(finalId, finalName);
+    socket.emit('joined', { playerId: finalId, name: finalName });
 
+    sendVoteStatus(socket, finalId);
     broadcastState();
   }));
 
