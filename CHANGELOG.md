@@ -1,6 +1,19 @@
 # Changelog — rama review-evento
 
-## Modo automático de avance
+## Ayuda en el panel y para los jugadores
+
+- **Pestaña «Ayuda» en el admin** (solo tras el login): flujo de un evento, consejo para evitar duplicados
+  (abrir el enlace en el navegador habitual; el truco de `?view=player` en la URL del QR), fusionar paso a
+  paso, modos manual y automático con sus tiempos actuales, temáticas y música, y limpieza.
+- **Pantalla de inicio**: bienvenida breve y **Jugar** como botón principal grande, con «Toca aquí para
+  entrar»; TV y Admin quedan como accesos secundarios («Solo organizadores»).
+- **Nombre**: «¿Cómo te llamas?», indicación clara y botón **Entrar** a todo el ancho.
+- **Sala de espera del jugador**: «¡Ya estás dentro!» y cómo se juega en 3 líneas con iconos (foto en la TV,
+  toca quién la hizo, +3 por acierto), más «Deja esta página abierta». Respeta la temática activa.
+- README al día: identidad persistente y su límite, fusión, modo de avance, tabla de ajustes del panel.
+- Solo texto e interfaz: no cambia la lógica del juego.
+
+## Modo automático de avance (`32f5578`)
 
 - **Modo manual** (por defecto, sin cambios): el admin revela y pasa de foto.
 - **Modo automático**: lo decide el SERVIDOR.
@@ -28,7 +41,7 @@
   - `state_update` y `/api/state` incluyen `autoMode`, `autoDelay`, `autoTimeout` y `autoPending`.
 - `test-auto-advance.js`: prueba de tiempos, bloqueos, carreras y temporizadores (solo en local).
 
-## Identidad del jugador y fusión de duplicados
+## Identidad del jugador y fusión de duplicados (`c145fc2`)
 
 Contexto: en el evento, quien escaneaba el QR desde la app de la cámara jugaba en una vista de navegador
 efímera; al cambiar de app la vista se cerraba y al volver (ya desde el navegador normal) aparecía como

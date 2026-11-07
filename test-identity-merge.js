@@ -168,7 +168,7 @@ const stored = (page) => page.evaluate(() => { try { return localStorage.getItem
   await adm.goto(`${BASE}/?view=admin`, { waitUntil: 'domcontentloaded' });
   await adm.getByPlaceholder('Contraseña').fill(PASS);
   await adm.getByPlaceholder('Contraseña').press('Enter');
-  await adm.getByText('Fusionar jugadores duplicados').click();
+  await adm.locator('summary', { hasText: 'Fusionar jugadores duplicados' }).click();
   const row = (pts) => adm.locator('div:has(> label > input[name=mergeTarget])', { hasText: 'Sonia' }).filter({ hasText: `${pts} pts` });
   await row(12).locator('input[type=radio]').check();      // destino: la Sonia del navegador normal
   await row(34).locator('input[type=checkbox]').check();   // fusionar: la de la vista de cámara

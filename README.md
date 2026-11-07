@@ -10,8 +10,11 @@ administración. Pensada para 15–20 jugadores simultáneos en la misma WiFi.
 2. Los **jugadores** entran escaneando el QR de la pantalla TV (o abriendo la URL) y eligen un nombre.
 3. El admin **empieza** el juego: las fotos se barajan y se muestran una a una en la TV.
 4. Cada jugador **vota** en su móvil quién cree que hizo la foto.
-5. El admin **revela** el autor: la TV muestra el nombre y el ranking; cada móvil ve si acertó.
+5. Se **revela** el autor: la TV muestra el nombre y el ranking; cada móvil ve si acertó.
 6. **Siguiente** foto, hasta acabar → ranking final. La partida se guarda en el historial.
+
+Revelar y pasar de foto lo hace el admin (**modo manual**, por defecto) o el servidor solo (**modo
+automático**, ver [Modo de avance](#modo-de-avance-manual-o-automático)).
 
 Puntuación: **+3 puntos por acierto**, 0 por fallo.
 
@@ -124,12 +127,27 @@ memoria (tras reiniciar el contenedor hay que volver a entrar).
 ### Panel admin
 
 - **Juego**: crear/borrar autores, subir varias fotos a la vez por autor (con progreso y aviso por cada foto
-  que falle o pase del límite), jugadores conectados, controles (Empezar · Revelar · Siguiente · Terminar ·
-  Resetear) y ranking. Durante una partida no se pueden borrar fotos ni autores (hay que resetear antes).
+  que falle o pase del límite), jugadores conectados, **fusionar jugadores duplicados**, controles
+  (Empezar · Revelar · Siguiente · Terminar · Resetear), **interruptor manual/automático** con cuenta atrás,
+  y ranking. Durante una partida no se pueden borrar fotos ni autores (hay que resetear antes).
 - **Estadísticas**: historial de partidas terminadas (se archiva al terminar o resetear una partida con
   votos; nunca se duplica).
-- **Ajustes**: URL pública del juego (QR), temática visual, estado de la música de la TV, purga automática
-  (desactivada por defecto) y borrado manual (datos de juego, o todo incluido el historial).
+- **Ajustes**: URL pública del juego (QR), modo de avance y sus tiempos, temática visual, estado de la música
+  de la TV, purga automática (desactivada por defecto) y borrado manual (datos de juego, o todo incluido el
+  historial).
+- **Ayuda**: guía breve para llevar el evento (flujo, duplicados y cómo fusionarlos, modos de avance,
+  temáticas y música, limpieza). Solo visible tras entrar como admin.
+
+#### Ajustes del panel (se guardan en la BD)
+
+| Ajuste | Valores | Por defecto | Notas |
+|---|---|---|---|
+| URL pública del juego | URL | *(vacía)* | Contenido del QR de la TV. Terminada en `?view=player`, lleva directo a poner el nombre. |
+| Modo de avance | manual / automático | manual | También se cambia en caliente desde *Juego*. |
+| Pausa tras revelar | 1–10 s | 3 s | Solo modo automático: tiempo entre revelar y pasar de foto. |
+| Tiempo máximo por foto | 10–600 s | 60 s | Solo modo automático: red de seguridad; revela aunque falten votos. |
+| Temática visual | ninguna / halloween / navidad | ninguna | Cosmética, en TV y móviles al instante. |
+| Purga automática | días | desactivada | Nunca borra con una partida en curso. |
 
 ### Comportamiento en directo
 
@@ -140,6 +158,41 @@ memoria (tras reiniciar el contenedor hay que volver a entrar).
 - **Reconexión**: si un móvil pierde la red ve "Reconectando…"; al volver recupera la foto actual, si ya
   votó y, si la foto ya se reveló, su resultado.
 - El contador "X/Y votos recibidos" cuenta solo jugadores conectados (o que ya votaron).
+- **Identidad del jugador**: el móvil guarda su `playerId` en `localStorage`. Al recargar, cerrar la pestaña,
+  bloquear el móvil o perder la red, vuelve como el **mismo** jugador (nombre, votos y puntos). Si el
+  almacenamiento está bloqueado (algún modo privado), el juego funciona igual pero sin recordarlo.
+  **Límite:** no cubre cambiar de navegador o de dispositivo. El caso típico es escanear el QR con la app de la
+  cámara (vista temporal que se cierra al cambiar de app) y volver por el navegador normal: entra un jugador
+  nuevo con el mismo nombre. Se evita pidiendo que abran el enlace en su navegador habitual, y se arregla
+  fusionando.
+- **Fusionar duplicados** (*Juego* → «Fusionar jugadores duplicados», `POST /api/admin/players/merge`): eliges
+  un destino y uno o varios a fusionar. Se suman puntos y votos. Si ambos votaron la misma foto queda un solo
+  voto (el del destino, o si no, el del primer fusionado) y sus puntos no se duplican. Los fusionados
+  desaparecen de la lista y del ranking; si su móvil vuelve con el id antiguo, entra como el destino.
+
+### Modo de avance: manual o automático
+
+- **Manual** (por defecto): el admin revela y pasa de foto.
+- **Automático**: lo decide el servidor, igual para TV, admin y jugadores.
+  - Revela en cuanto han votado **todos los jugadores conectados** (la misma noción que el contador de la
+    TV). Si un jugador se desconecta y con eso ya votaron todos los demás, revela; se esperan 1,5 s para que
+    una recarga no cuente como irse.
+  - Tras la **pausa** pasa a la siguiente foto; tras la última, al ranking final.
+  - **Anti-bloqueo**: si no votan todos, al cumplirse el **tiempo máximo por foto** revela igualmente. Sin
+    nadie conectado no revela por votos; espera a ese tiempo máximo.
+  - **El admin siempre puede intervenir**: Revelar, Siguiente y Terminar se adelantan a la cuenta atrás, y el
+    automático continúa desde ahí sin duplicar nada.
+  - Hay un único temporizador pendiente, ligado a la foto y fase. Lo cancelan las acciones manuales, el cambio
+    de modo, terminar, resetear y borrar. Tras reiniciar el servidor, el modo automático se reanuda.
+- La TV muestra «Siguiente foto en N s» / «Ranking final en N s»; el admin ve también el tiempo máximo.
+  El estado (`state_update`, `/api/state`) incluye `autoMode`, `autoDelay`, `autoTimeout` y `autoPending`.
+
+### Ayuda para los jugadores
+
+- La pantalla de inicio destaca **Jugar** como acción principal; TV y Admin quedan como accesos secundarios.
+- Antes de entrar se pide el nombre con una indicación clara y un botón **Entrar** grande.
+- Mientras esperan a que empiece, el móvil muestra en 3 líneas cómo se juega y pide dejar la página abierta.
+  Al empezar la partida da paso a los botones de voto.
 
 ## Temática visual y música de la TV
 
@@ -215,5 +268,5 @@ datos de forma consistente. Como último recurso, con el contenedor parado:
 ## Pruebas
 
 El repositorio incluye scripts de ensayo y carga para desarrollo (`rehearsal.js`, `rehearsal-browser.js`,
-`test-*.js`, `simulate.sh`, `test-load.js`), que se ejecutan con Node desde fuera del contenedor contra una
+`test-*.js` —entre ellos `test-identity-merge.js` y `test-auto-advance.js`—, `simulate.sh`, `test-load.js`), que se ejecutan con Node desde fuera del contenedor contra una
 instancia **de pruebas** (escriben datos). Ver la cabecera de cada script para su uso.
