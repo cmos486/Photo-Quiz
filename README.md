@@ -191,8 +191,10 @@ memoria (tras reiniciar el contenedor hay que volver a entrar).
 
 - La pantalla de inicio destaca **Jugar** como acción principal; TV y Admin quedan como accesos secundarios.
 - Antes de entrar se pide el nombre con una indicación clara y un botón **Entrar** grande.
-- Mientras esperan a que empiece, el móvil muestra en 3 líneas cómo se juega y pide dejar la página abierta.
-  Al empezar la partida da paso a los botones de voto.
+- Mientras esperan a que empiece, el móvil muestra en 3 líneas cómo se juega. Al empezar la partida da paso
+  a los botones de voto.
+- En la espera y durante la partida, bajo «Jugando como», un recordatorio: «No cierres esta página ni cambies
+  de app para no perder tu sitio». Al volver de otra app tras más de 1 s, aviso efímero «¡De nuevo aquí!».
 
 ## Temática visual y música de la TV
 

@@ -713,6 +713,10 @@
                   x-text="gameState === 'lobby' ? 'Esperando...' : gameState === 'playing' ? 'Votando' : gameState === 'revealed' ? 'Revelado' : 'Terminado'"></span>
           </div>
 
+          <!-- Recordatorio en espera y durante la partida: arriba y en el flujo (siempre a la vista, nunca tapa nada) -->
+          <p x-show="gameState === 'lobby' || gameState === 'playing' || gameState === 'revealed'" data-testid="stay-reminder"
+             class="-mt-2 mb-3 text-center text-xs sm:text-sm text-gray-500">📌 No cierres esta página ni cambies de app para no perder tu sitio</p>
+
           <!-- Lobby waiting -->
           <div x-show="gameState === 'lobby'" class="text-center py-6 sm:py-10" data-testid="lobby-help">
             <p class="text-2xl sm:text-3xl font-bold text-gray-800">✅ ¡Ya estás dentro!</p>
@@ -725,12 +729,7 @@
                 <li class="flex items-center gap-3"><span class="text-3xl w-10 text-center">🏆</span><span><b>+3 puntos</b> por acierto</span></li>
               </ul>
             </div>
-            <p class="text-gray-500 text-sm mt-5">📌 Deja esta página abierta</p>
           </div>
-
-          <!-- Recordatorio discreto durante la partida: arriba y en el flujo (siempre a la vista, nunca tapa los botones) -->
-          <p x-show="gameState === 'playing' || gameState === 'revealed'" data-testid="stay-reminder"
-             class="-mt-2 mb-3 text-center text-xs sm:text-sm text-gray-500">📌 No cierres esta página ni cambies de app para no perder tu sitio</p>
 
           <!-- Voting -->
           <div x-show="gameState === 'playing'">

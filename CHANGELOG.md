@@ -16,6 +16,8 @@
   móvil («No cierres esta página ni cambies de app para no perder tu sitio»). Al volver de otra app o
   pestaña tras más de 1 s fuera, aviso efímero «👋 ¡De nuevo aquí! Sigues en la partida» (3,5 s, no
   intercepta toques). Es solo visual: no bloquea la salida ni toca el socket.
+- El mismo recordatorio aparece también en la **sala de espera** (donde más se tiende a cambiar de app),
+  en lugar del discreto «Deja esta página abierta»: un solo aviso, sin duplicados.
 
 ## Modo automático de avance (`32f5578`)
 
