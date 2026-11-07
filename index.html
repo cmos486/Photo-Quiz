@@ -670,6 +670,12 @@
     <div class="max-w-3xl mx-auto p-4 sm:p-6 lg:p-8 min-h-screen bg-gray-50 pq-root pq-player" :data-theme="theme">
       <div x-show="theme !== 'none'" class="text-center text-2xl tracking-widest select-none" aria-hidden="true" x-text="themeEmojis.join(' ')"></div>
 
+      <!-- Aviso efímero al volver a la página (solo visual; no toca el socket) -->
+      <div x-show="welcomeBack" x-transition.opacity.duration.500ms data-testid="welcome-back" role="status"
+           class="fixed top-4 inset-x-4 z-50 mx-auto max-w-sm text-center bg-gray-900/90 text-white text-base font-medium px-4 py-3 rounded-xl shadow-lg pointer-events-none">
+        👋 ¡De nuevo aquí! Sigues en la partida
+      </div>
+
       <!-- Name entry -->
       <template x-if="!playerJoined">
         <div class="flex flex-col items-center justify-center min-h-screen">
@@ -721,6 +727,10 @@
             </div>
             <p class="text-gray-500 text-sm mt-5">📌 Deja esta página abierta</p>
           </div>
+
+          <!-- Recordatorio discreto durante la partida: arriba y en el flujo (siempre a la vista, nunca tapa los botones) -->
+          <p x-show="gameState === 'playing' || gameState === 'revealed'" data-testid="stay-reminder"
+             class="-mt-2 mb-3 text-center text-xs sm:text-sm text-gray-500">📌 No cierres esta página ni cambies de app para no perder tu sitio</p>
 
           <!-- Voting -->
           <div x-show="gameState === 'playing'">
@@ -876,6 +886,9 @@
         autoTimeoutInput: 60,
         autoMsg: '',
         nowTick: Date.now(),
+        welcomeBack: false,     // aviso "¡De nuevo aquí!" al volver a la página
+        _hiddenAt: 0,
+        _welcomeTimer: null,
         get autoSecondsLeft() {
           return this.autoPending ? Math.max(0, Math.ceil((this.autoPending.deadline - this.nowTick) / 1000)) : null;
         },
@@ -906,6 +919,20 @@
           }
 
           setInterval(() => { if (this.autoPending) this.nowTick = Date.now(); }, 250);
+
+          // Recordatorio amable al volver de otra app/pestaña. Solo visual: la reconexión ya la hace
+          // socket.io. Si la sesión se perdió (playerJoined = false) no se muestra y el flujo sigue igual.
+          if (typeof document.addEventListener === 'function') {
+            document.addEventListener('visibilitychange', () => {
+              if (document.visibilityState === 'hidden') { this._hiddenAt = Date.now(); return; }
+              const away = this._hiddenAt ? Date.now() - this._hiddenAt : 0;
+              this._hiddenAt = 0;
+              if (away < 1000 || this.view !== 'player' || !this.playerJoined || this.gameState === 'finished') return;
+              this.welcomeBack = true;
+              clearTimeout(this._welcomeTimer);
+              this._welcomeTimer = setTimeout(() => { this.welcomeBack = false; }, 3500);
+            });
+          }
 
           // Connect socket
           this.socket = io({ transports: ['websocket', 'polling'] });

@@ -12,6 +12,10 @@
   toca quién la hizo, +3 por acierto), más «Deja esta página abierta». Respeta la temática activa.
 - README al día: identidad persistente y su límite, fusión, modo de avance, tabla de ajustes del panel.
 - Solo texto e interfaz: no cambia la lógica del juego.
+- **Recordatorio de no salir de la página**: durante la partida, una línea discreta bajo la cabecera del
+  móvil («No cierres esta página ni cambies de app para no perder tu sitio»). Al volver de otra app o
+  pestaña tras más de 1 s fuera, aviso efímero «👋 ¡De nuevo aquí! Sigues en la partida» (3,5 s, no
+  intercepta toques). Es solo visual: no bloquea la salida ni toca el socket.
 
 ## Modo automático de avance (`32f5578`)
 
