@@ -1,0 +1,252 @@
+<title>Photo Quiz Temas v2</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Creepster&family=Mountains+of+Christmas:wght@700&display=swap">
+<!-- Mismo Tailwind precompilado que la app; en el repo está en la carpeta superior -->
+<link rel="stylesheet" href="tailwind.css" onerror="this.onerror=null;this.href='../tailwind.css'">
+<link rel="stylesheet" href="themes-v2.css">
+<style>
+  /* Página contenedora de la muestra (neutra, no forma parte del tema) */
+  :root {
+    --page-bg: #f3f4f7; --page-fg: #1c2230; --page-muted: #5d6677; --page-line: #dcdfe6; --frame: #11141b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --page-bg: #0f1218; --page-fg: #e7eaf0; --page-muted: #9aa3b2; --page-line: #262b36; --frame: #000; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --page-bg: #0f1218; --page-fg: #e7eaf0; --page-muted: #9aa3b2; --page-line: #262b36; --frame: #000; color-scheme: dark; }
+  body {
+    background: var(--page-bg); color: var(--page-fg);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 24px 48px;
+  }
+  .wrap { max-width: 1240px; margin: 0 auto; display: grid; gap: 40px; }
+  .intro h1 { font-size: 1.75rem; font-weight: 700; text-wrap: balance; }
+  .intro p { color: var(--page-muted); max-width: 70ch; margin-top: 6px; line-height: 1.5; }
+  .tag { display: inline-block; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--page-muted); border: 1px solid var(--page-line); border-radius: 999px; padding: 2px 10px; margin-bottom: 8px; }
+  h2.sec { font-size: 1.15rem; font-weight: 700; margin-bottom: 12px; }
+  .phones { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
+  figure { display: grid; gap: 8px; margin: 0; min-width: 0; }
+  figcaption { font-size: .85rem; color: var(--page-muted); }
+  figcaption b { color: var(--page-fg); }
+  /* Marco de móvil: 360x700 aprox., escala con el ancho de la columna */
+  .phone { border: 10px solid var(--frame); border-radius: 30px; overflow: hidden; aspect-ratio: 360 / 700; max-width: 100%; position: relative; }
+  .phone > .pq-root { height: 100%; overflow: hidden; font-size: 15px; }
+  /* Marco de TV 16:9; el contenido usa unidades del contenedor */
+  .tv { container-type: inline-size; aspect-ratio: 16 / 9; border: 12px solid var(--frame); border-radius: 14px; overflow: hidden; position: relative; max-width: 100%; }
+  .tv > .pq-root { position: absolute; inset: 0; overflow: hidden; display: grid; grid-template-rows: 1fr auto; }
+  .tv-stage { position: relative; z-index: 1; display: grid; place-items: center; padding: 2.5cqw 3cqw 1cqw; min-height: 0; }
+  .tv-photo { height: 100%; max-height: 32cqw; aspect-ratio: 3 / 2; border-radius: 1cqw; box-shadow: 0 1.5cqw 4cqw rgba(0,0,0,.5); background-size: cover; background-position: center; max-width: 100%; }
+  .tv-badge { position: absolute; top: 1.6cqw; right: 2cqw; font-size: 1.2cqw; padding: .3cqw 1cqw; border-radius: 999px; background: rgba(0,0,0,.45); color: #fff; }
+  .tv-head { position: absolute; top: 1.4cqw; left: 2cqw; font-size: 2.6cqw; line-height: 1; }
+  .tv-reveal { position: absolute; bottom: 1.2cqw; left: 50%; transform: translateX(-50%); font-size: 2.2cqw; font-weight: 700; padding: .8cqw 2.6cqw; border-radius: 1.2cqw; white-space: nowrap; }
+  .tv-rank { position: relative; z-index: 1; padding: 1.2cqw 3cqw 1.6cqw; }
+  .tv-rank h3 { text-align: center; font-size: 1.5cqw; margin-bottom: .8cqw; font-weight: 700; }
+  .tv-rank ol { display: grid; grid-template-columns: repeat(5, 1fr); gap: .8cqw; list-style: none; padding: 0; margin: 0; }
+  .tv-rank li { border-radius: .8cqw; padding: .7cqw .9cqw; font-size: 1.3cqw; display: flex; justify-content: space-between; gap: .5cqw; }
+  .tv-rank li span:last-child { font-variant-numeric: tabular-nums; font-weight: 700; }
+  .tv-bars { position: absolute; right: 3cqw; top: 6cqw; width: 22cqw; display: grid; gap: .7cqw; font-size: 1.2cqw; z-index: 1; }
+  .tv-bars .row { display: grid; grid-template-columns: 7cqw 1fr 2cqw; align-items: center; gap: .6cqw; }
+  .tv-bars .track { height: 1.3cqw; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
+  .tv-bars .pq-bar { height: 100%; border-radius: 999px; }
+  .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+  .note { border: 1px solid var(--page-line); border-radius: 12px; padding: 16px 18px; min-width: 0; }
+  .note h3 { font-weight: 700; margin-bottom: 8px; }
+  .note ul { padding-left: 1.1em; display: grid; gap: 6px; line-height: 1.45; color: var(--page-fg); }
+  .note li::marker { color: var(--page-muted); }
+  .motion { font-size: .85rem; color: var(--page-muted); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <span class="tag">Muestra · fase 1 · no es la app</span>
+    <h1>Temas v2: Halloween y Navidad</h1>
+    <p>Así quedarían el móvil del jugador y la TV con los temas ampliados. Usa el mismo Tailwind de la app y el mismo sistema de temas (<code>.pq-root[data-theme]</code> con tokens y clases <code>pq-*</code>), de modo que en la fase 2 se traslada tal cual. El tema <b>none</b> no cambia nada. Contenido de ejemplo.</p>
+  </header>
+
+  <!-- ===================== JUGADOR ===================== -->
+  <section>
+    <h2 class="sec">Móvil del jugador (estático, sin animaciones)</h2>
+    <div class="phones" id="phones"></div>
+  </section>
+
+  <!-- ===================== TV ===================== -->
+  <section>
+    <h2 class="sec">Pantalla TV (con efecto animado)</h2>
+    <div style="display:grid; gap:24px">
+      <figure>
+        <div class="tv">
+          <div class="pq-root pq-tv" data-theme="halloween">
+            <canvas class="pq-fx" data-fx="halloween" aria-hidden="true"></canvas>
+            <div class="tv-stage">
+              <div class="tv-head pq-title">Photo Quiz</div>
+              <div class="tv-badge">Foto 3 / 8</div>
+              <div class="tv-photo" style="background-image:var(--photo)"></div>
+              <div class="tv-reveal pq-reveal">📸 Lucía Ferrer 🎃</div>
+            </div>
+            <div class="tv-rank pq-panel">
+              <h3 class="pq-title" style="font-size:2cqw">Ranking</h3>
+              <ol>
+                <li class="pq-rank-item"><span>🥇 Adriana</span><span>18</span></li>
+                <li class="pq-rank-item"><span>🥈 Carola</span><span>15</span></li>
+                <li class="pq-rank-item"><span>🥉 Elena</span><span>15</span></li>
+                <li class="pq-rank-item"><span>4 Jordi</span><span>12</span></li>
+                <li class="pq-rank-item"><span>5 Sonia</span><span>9</span></li>
+              </ol>
+            </div>
+          </div>
+        </div>
+        <figcaption><b>Halloween</b> · foto revelada con ranking. Murciélagos cruzando la parte alta en un solo canvas.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="tv">
+          <div class="pq-root pq-tv" data-theme="navidad">
+            <canvas class="pq-fx" data-fx="navidad" aria-hidden="true"></canvas>
+            <div class="tv-stage" style="justify-items:start; padding-left:6cqw">
+              <div class="tv-head pq-title">Photo Quiz</div>
+              <div class="tv-badge">Foto 3 / 8</div>
+              <div class="tv-photo" style="background-image:var(--photo)"></div>
+              <div class="tv-bars pq-muted">
+                <div class="row"><span>Lucía</span><div class="track"><div class="pq-bar" style="width:72%"></div></div><span>8</span></div>
+                <div class="row"><span>Marcos</span><div class="track"><div class="pq-bar" style="width:36%"></div></div><span>4</span></div>
+                <div class="row"><span>Ana</span><div class="track"><div class="pq-bar" style="width:18%"></div></div><span>2</span></div>
+                <div class="row"><span>Pau</span><div class="track"><div class="pq-bar" style="width:9%"></div></div><span>1</span></div>
+                <p style="margin-top:.6cqw">15/18 votos recibidos</p>
+              </div>
+            </div>
+            <div class="tv-rank pq-panel">
+              <h3 class="pq-title" style="font-size:2.2cqw">¿Quién hizo esta foto?</h3>
+            </div>
+          </div>
+        </div>
+        <figcaption><b>Navidad</b> · votación en curso con barras. Nieve cayendo en un solo canvas.</figcaption>
+      </figure>
+      <p class="motion" id="motion-note"></p>
+    </div>
+  </section>
+
+  <!-- ===================== DECISIONES ===================== -->
+  <section>
+    <h2 class="sec">Decisiones de diseño</h2>
+    <div class="notes">
+      <div class="note">
+        <h3>🎃 Halloween</h3>
+        <ul>
+          <li>Fondo de noche morada casi negra con un resplandor cálido arriba (la «luna») y otro violeta abajo. Tarjetas y botones en morado oscuro con borde marcado.</li>
+          <li>Naranja calabaza como único acento fuerte: título, botón principal, foco del botón de voto y barras (naranja a ámbar). Violeta solo para la etiqueta de estado.</li>
+          <li>Títulos grandes en <i>Creepster</i>; el cuerpo y los botones siguen en la fuente de siempre para leerse bien.</li>
+          <li>El recordatorio de no salir pasa a ámbar y negrita: es la línea más importante después de votar.</li>
+        </ul>
+      </div>
+      <div class="note">
+        <h3>🎄 Navidad</h3>
+        <ul>
+          <li>Móvil en blanco nieve con cabecera azul noche ribeteada en dorado. La TV es de noche: azul profundo con brillo dorado arriba.</li>
+          <li>Rojo como acento principal (título, botón, foco), verde como franja lateral de los botones de voto, dorado en ribetes y título de la TV.</li>
+          <li>Barras de la TV a rayas rojo/blanco tipo bastón de caramelo; la revelación en rojo a verde con borde dorado.</li>
+          <li>Títulos en <i>Mountains of Christmas</i>, solo en tamaños grandes.</li>
+        </ul>
+      </div>
+      <div class="note">
+        <h3>⚙️ Técnica (vale para la fase 2)</h3>
+        <ul>
+          <li><code>themes-v2.css</code>: tokens por tema y vista (<code>--pq-bg</code>, <code>--pq-card</code>, <code>--pq-accent</code>…) y reglas por clase <code>pq-*</code>. Todo cuelga de <code>[data-theme="halloween|navidad"]</code>: <b>none</b> no recibe ninguna regla.</li>
+          <li><code>tv-effects.js</code>: un solo canvas y un bucle <code>requestAnimationFrame</code> (hasta ~160 copos o 4-6 murciélagos). Solo se crea en su tema; con <code>prefers-reduced-motion</code> no se anima.</li>
+          <li>Móvil y admin: solo color, fondo y títulos; ninguna animación.</li>
+          <li>Pendiente de decidir en la fase 2: las dos tipografías vienen de Google Fonts; en la app conviene servirlas desde el propio servidor (o quedarse sin ellas si fallan).</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</div>
+
+<template id="phone-tpl">
+  <figure>
+    <div class="phone">
+      <div class="pq-root pq-player p-4" data-theme="">
+        <div class="pq-header flex items-center justify-between mb-3">
+          <div>
+            <span class="text-sm pq-muted">Jugando como</span>
+            <h2 class="font-bold text-lg">Marta</h2>
+          </div>
+          <span class="pq-chip px-3 py-1 rounded-full text-xs font-medium" data-chip></span>
+        </div>
+        <p class="pq-reminder mb-3 text-center text-xs">📌 No cierres esta página ni cambies de app para no perder tu sitio</p>
+        <div data-body></div>
+      </div>
+    </div>
+    <figcaption></figcaption>
+  </figure>
+</template>
+
+<template id="lobby-body">
+  <div class="text-center py-4">
+    <p class="pq-title text-3xl">¡Ya estás dentro!</p>
+    <p class="pq-muted text-base mt-1 mb-5">⏳ El juego empieza enseguida</p>
+    <div class="pq-card bg-white rounded-2xl shadow border border-gray-100 p-4 text-left">
+      <p class="text-xs font-semibold uppercase tracking-wide pq-muted mb-3">Cómo se juega</p>
+      <ul class="space-y-3 text-lg leading-snug">
+        <li class="flex items-center gap-3"><span class="text-3xl w-10 text-center">📺</span><span>Mira la <b>foto</b> en la pantalla grande</span></li>
+        <li class="flex items-center gap-3"><span class="text-3xl w-10 text-center">👆</span><span>Aquí, toca <b>quién crees</b> que la hizo</span></li>
+        <li class="flex items-center gap-3"><span class="text-3xl w-10 text-center">🏆</span><span><b>+3 puntos</b> por acierto</span></li>
+      </ul>
+    </div>
+  </div>
+</template>
+
+<template id="vote-body">
+  <div class="text-center mb-4">
+    <p class="text-sm pq-muted">Foto 3 de 8</p>
+    <p class="pq-text font-bold mt-1 text-lg">¿Quién hizo esta foto?</p>
+    <p class="text-xs pq-muted mt-1">Mira la foto en la pantalla TV</p>
+  </div>
+  <div class="grid grid-cols-1 gap-2">
+    <button class="pq-vote-btn w-full text-left px-4 py-3 bg-white rounded-xl border-2 border-gray-200 font-medium">Lucía Ferrer</button>
+    <button class="pq-vote-btn w-full text-left px-4 py-3 bg-white rounded-xl border-2 border-gray-200 font-medium">Marcos Vidal</button>
+    <button class="pq-vote-btn w-full text-left px-4 py-3 bg-white rounded-xl border-2 border-gray-200 font-medium">Ana García</button>
+    <button class="pq-vote-btn w-full text-left px-4 py-3 bg-white rounded-xl border-2 border-gray-200 font-medium">Pau Serra</button>
+    <button class="pq-vote-btn w-full text-left px-4 py-3 bg-white rounded-xl border-2 border-gray-200 font-medium">Nuria Prat</button>
+  </div>
+</template>
+
+<script src="tv-effects.js"></script>
+<script>
+  // Foto de ejemplo (paisaje dibujado en SVG, sin recursos externos)
+  const photo = "url(\"data:image/svg+xml," + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200"><defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6b26b"/><stop offset="1" stop-color="#e06666"/></linearGradient></defs><rect width="300" height="200" fill="url(#s)"/><circle cx="220" cy="70" r="26" fill="#fff3c4"/><path d="M0 140 L70 80 L120 125 L170 70 L240 135 L300 100 V200 H0Z" fill="#5b3a63"/><path d="M0 165 Q80 135 150 160 T300 150 V200 H0Z" fill="#2f2440"/></svg>'
+  ) + "\")";
+  document.documentElement.style.setProperty('--photo', photo);
+
+  // Cuatro móviles: espera y votación en cada tema
+  const phones = document.getElementById('phones');
+  const views = [
+    ['halloween', 'lobby', 'Halloween · sala de espera'],
+    ['halloween', 'vote', 'Halloween · votación (el 2º botón con foco)'],
+    ['navidad', 'lobby', 'Navidad · sala de espera'],
+    ['navidad', 'vote', 'Navidad · votación (el 2º botón con foco)'],
+  ];
+  for (const [theme, view, caption] of views) {
+    const fig = document.getElementById('phone-tpl').content.cloneNode(true);
+    fig.querySelector('.pq-root').dataset.theme = theme;
+    fig.querySelector('[data-chip]').textContent = view === 'lobby' ? 'Esperando…' : 'Votando';
+    fig.querySelector('[data-body]').appendChild(document.getElementById(view + '-body').content.cloneNode(true));
+    const cap = fig.querySelector('figcaption');
+    const [t, ...rest] = caption.split(' · ');
+    cap.innerHTML = '<b>' + t + '</b> · ' + rest.join(' · ');
+    phones.appendChild(fig);
+  }
+  // Simula el estado "foco/hover" del segundo botón para enseñar el acento
+  document.querySelectorAll('.phone').forEach(p => {
+    const b = p.querySelectorAll('.pq-vote-btn')[1];
+    if (b) b.style.cssText = 'border-color:var(--pq-accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--pq-accent) 25%, transparent)';
+  });
+
+  // Efectos de la TV
+  document.querySelectorAll('canvas[data-fx]').forEach(c => PQThemeFx.start(c, c.dataset.fx));
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  document.getElementById('motion-note').textContent = reduced
+    ? 'Tu sistema pide reducir el movimiento: la nieve y los murciélagos están desactivados, como harán en la app.'
+    : 'Si activas «reducir movimiento» en tu sistema, la nieve y los murciélagos se desactivan solos.';
+</script>
