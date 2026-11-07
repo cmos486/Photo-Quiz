@@ -199,9 +199,16 @@ memoria (tras reiniciar el contenedor hay que volver a entrar).
 ## Temática visual y música de la TV
 
 - **Temática** (Admin → Ajustes → *Temática visual*): `Ninguna` (por defecto), `🎃 Halloween`, `🎄 Navidad`.
-  Decora la TV y los móviles (colores de acento, emojis y un fondo sutil detrás del contenido; nunca tapa
-  botones ni texto). Se aplica al instante, sin recargar. Es puramente estética: no toca el juego.
-  `Ninguna` es el aspecto original.
+  Cambia colores, fondos y títulos de la TV, los móviles y el panel admin. Se aplica al instante, sin recargar.
+  Es puramente estética: no toca el juego. `Ninguna` es el aspecto original (sin ninguna regla aplicada).
+  - **Halloween**: noche morada casi negra, acento naranja calabaza, títulos con tipografía terrorífica.
+    En la TV, murciélagos cruzando la parte alta.
+  - **Navidad**: crema, rojo, verde abeto y dorado. Móvil claro con cabecera roja; TV en verde abeto con
+    guirnalda de luces. En la TV, nieve cayendo.
+  - Las animaciones son **solo de la TV** (un único canvas; no corren fuera de su tema y se desactivan si el
+    sistema pide reducir el movimiento). Móviles y admin solo cambian de color, sin animaciones.
+  - Las tipografías de los títulos se cargan de Google Fonts sin bloquear la página; si no llegan, se usa la
+    fuente de reserva.
 - **Música (solo en la TV; los móviles nunca reproducen audio)**: deja los MP3 en la carpeta `audio/` del
   proyecto (montada en el contenedor como `/app/audio`, solo lectura). No se versionan (`.gitignore`) y no
   hace falta rebuild ni reinicio.

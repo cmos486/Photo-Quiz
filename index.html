@@ -9,6 +9,9 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.js" integrity="sha384-VT1EeewTCEXgndcPMQ0PzV+uVFYjxFIjmAA7s5gcMX9t4Dt5TD+OVQIn7NJWIXn7" crossorigin="anonymous"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <!-- Tipografías de los títulos temáticos: carga NO bloqueante (si tarda o falla, se usa la fuente de reserva) -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Creepster&family=Mountains+of+Christmas:wght@700&display=swap" media="print" onload="this.media='all'">
   <style>
     [x-cloak] { display: none !important; }
     @keyframes fadeInUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
@@ -19,31 +22,186 @@
     .bar-transition { transition: width 0.5s ease-out; }
     .photo-reveal { animation: fadeInUp 0.8s ease-out; }
 
-    /* ===== Temáticas (cosméticas). Solo aplican a las raíces de TV y jugador con
-       data-theme="halloween" | "navidad". Con "none" no se aplica ninguna regla. ===== */
-    .pq-root[data-theme="halloween"], .pq-root[data-theme="navidad"] { position: relative; isolation: isolate; }
-    /* Fondo decorativo: detrás del contenido (z-index -1), solo visible en zonas sin fondo propio */
-    .pq-root[data-theme="halloween"]::before, .pq-root[data-theme="navidad"]::before {
-      content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; background-repeat: repeat;
+    /* ===== Temáticas v2 (cosméticas). Todo cuelga de .pq-root[data-theme="halloween"|"navidad"]:
+       con "none" no aplica ninguna regla (aspecto original). Tokens por tema y vista + clases pq-*.
+       Las animaciones (nieve/murciélagos) son solo de la TV y viven en PQThemeFx (script). ===== */
+    /* ---------- HALLOWEEN: noche morada, naranja calabaza ---------- */
+    .pq-root[data-theme="halloween"] {
+      --pq-bg: #140b1f;
+      --pq-bg-2: #1d1030;
+      --pq-card: #231538;
+      --pq-line: #3d285c;
+      --pq-text: #f5ecff;
+      --pq-muted: #b9a6d3;
+      --pq-accent: #ff7b1c;
+      --pq-accent-2: #9b5cff;
+      --pq-gold: #ffb347;
+      --pq-on-accent: #1d0b00;
+      --pq-display: "Creepster", "Impact", "Arial Black", system-ui, sans-serif;
+      --pq-glow: radial-gradient(60% 45% at 85% 0%, rgba(255, 179, 71, .16), transparent 70%),
+                 radial-gradient(70% 60% at 0% 100%, rgba(155, 92, 255, .14), transparent 70%);
     }
-    .pq-root[data-theme="halloween"]::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Ctext x='20' y='60' font-size='34'%3E%F0%9F%8E%83%3C/text%3E%3Ctext x='130' y='120' font-size='30'%3E%F0%9F%A6%87%3C/text%3E%3Ctext x='40' y='190' font-size='28'%3E%F0%9F%95%B8%EF%B8%8F%3C/text%3E%3C/svg%3E"); opacity: .09; }
-    .pq-root[data-theme="navidad"]::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Ctext x='20' y='60' font-size='30'%3E%E2%9D%84%EF%B8%8F%3C/text%3E%3Ctext x='130' y='120' font-size='34'%3E%F0%9F%8E%84%3C/text%3E%3Ctext x='50' y='190' font-size='26'%3E%E2%9C%A8%3C/text%3E%3C/svg%3E"); opacity: .09; }
-    /* TV */
-    .pq-tv[data-theme="halloween"] { background-color: #0d0714; }
-    .pq-tv[data-theme="navidad"] { background-color: #06110b; }
-    .pq-tv[data-theme="halloween"] .pq-panel { background-color: #1c1027; }
-    .pq-tv[data-theme="navidad"] .pq-panel { background-color: #0f2318; }
-    .pq-tv[data-theme="halloween"] .pq-bar { background-color: #f97316; }
-    .pq-tv[data-theme="navidad"] .pq-bar { background-image: linear-gradient(90deg, #dc2626, #16a34a); }
-    .pq-tv[data-theme="halloween"] .pq-reveal { background-image: linear-gradient(90deg, #ea580c, #7c3aed); }
-    .pq-tv[data-theme="navidad"] .pq-reveal { background-image: linear-gradient(90deg, #b91c1c, #15803d); }
-    /* Jugador */
-    .pq-player[data-theme="halloween"] { background-color: #fff7ed; }
-    .pq-player[data-theme="navidad"] { background-color: #f0fdf4; }
-    .pq-player[data-theme="halloween"] .pq-accent-btn { background-color: #c2410c; }
-    .pq-player[data-theme="navidad"] .pq-accent-btn { background-color: #b91c1c; }
-    .pq-player[data-theme="halloween"] .pq-vote-btn:hover { border-color: #f97316; background-color: #ffedd5; }
-    .pq-player[data-theme="navidad"] .pq-vote-btn:hover { border-color: #16a34a; background-color: #dcfce7; }
+
+    /* ---------- NAVIDAD (v2): crema cálido, rojo y verde abeto, dorado; nada de azul noche ---------- */
+    .pq-root[data-theme="navidad"] {
+      --pq-bg: #fbf3e4;            /* crema/papel de regalo */
+      --pq-bg-2: #b3121f;          /* rojo navidad (cabecera) */
+      --pq-card: #ffffff;
+      --pq-line: #e7cf9a;          /* borde dorado suave */
+      --pq-text: #3a1a12;          /* marrón chocolate, más cálido que el negro */
+      --pq-muted: #7a5a48;
+      --pq-accent: #c4202f;        /* rojo */
+      --pq-accent-2: #146b3a;      /* verde abeto */
+      --pq-gold: #c9952b;
+      --pq-on-accent: #ffffff;
+      --pq-display: "Mountains of Christmas", "Georgia", serif;
+      /* luz cálida arriba, como papel de regalo bajo una lámpara */
+      --pq-glow: linear-gradient(180deg, rgba(196, 32, 47, .07), transparent 220px);
+    }
+    /* TV de Navidad: verde abeto con guirnalda de luces arriba (rojo/oro/verde) */
+    .pq-tv[data-theme="navidad"] {
+      --pq-bg: #0f5a33;
+      --pq-bg-2: #a3141f;          /* panel inferior rojo */
+      --pq-card: #fff6e6;          /* fichas de ranking crema */
+      --pq-line: #e2b950;
+      --pq-text: #fff8ec;
+      --pq-muted: #f3e3c3;
+      --pq-on-accent: #ffffff;
+      --pq-glow: radial-gradient(70% 60% at 50% 35%, #187a45, transparent 75%);
+    }
+    /* Guirnalda de luces (oro, rojo, verde) colgando arriba + resplandor central. Va en una regla propia:
+       posición y tamaño de cada capa no caben en background-image. */
+    .pq-root.pq-tv[data-theme="navidad"] {
+      background:
+        radial-gradient(circle, #ffd45c 0 7px, rgba(255, 212, 92, .4) 8px 14px, transparent 15px) 0 4px / 150px 34px repeat-x,
+        radial-gradient(circle, #ff4d4d 0 7px, rgba(255, 77, 77, .4) 8px 14px, transparent 15px) 50px 4px / 150px 34px repeat-x,
+        radial-gradient(circle, #8dffab 0 7px, rgba(141, 255, 171, .35) 8px 14px, transparent 15px) 100px 4px / 150px 34px repeat-x,
+        linear-gradient(#0b3d22, #0b3d22) 0 20px / 100% 2px repeat-x,
+        var(--pq-glow),
+        var(--pq-bg);
+    }
+
+    /* ---------- Reglas comunes a los dos temas (todo sale de los tokens) ---------- */
+    .pq-root:is([data-theme="halloween"], [data-theme="navidad"]) {
+      background-color: var(--pq-bg);
+      background-image: var(--pq-glow);
+      color: var(--pq-text);
+    }
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-title {
+      font-family: var(--pq-display);
+      color: var(--pq-text);
+      letter-spacing: .01em;
+      font-weight: 400;
+    }
+    [data-theme="halloween"] .pq-title { color: var(--pq-accent); text-shadow: 0 2px 0 #000, 0 0 18px rgba(255, 123, 28, .35); }
+    [data-theme="navidad"] .pq-title { color: var(--pq-accent); font-weight: 700; }
+    .pq-tv[data-theme="navidad"] .pq-title { color: #ffe08a; font-weight: 700; text-shadow: 0 2px 0 #7a0d15, 0 0 18px rgba(255, 224, 138, .45); }
+
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-text { color: var(--pq-text); }
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-muted { color: var(--pq-muted); }
+
+    /* Cabecera del móvil: banda propia del tema */
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-header {
+      background: var(--pq-bg-2);
+      color: #fff;
+      border-radius: 1rem;
+      padding: .75rem 1rem;
+    }
+    [data-theme="halloween"] .pq-header { border: 1px solid var(--pq-line); }
+    [data-theme="navidad"] .pq-header {
+      /* banda roja con ribete de bastón de caramelo */
+      background: repeating-linear-gradient(135deg, #fff 0 7px, var(--pq-accent-2) 7px 14px) bottom / 100% 6px no-repeat, var(--pq-bg-2);
+      padding-bottom: calc(.75rem + 6px);
+    }
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-header .pq-muted { color: rgba(255, 255, 255, .7); }
+
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-chip {
+      background: var(--pq-accent-2);
+      color: #fff;
+    }
+
+    /* Tarjetas y botones de voto */
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-card {
+      background: var(--pq-card);
+      border-color: var(--pq-line);
+      color: var(--pq-text);
+    }
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-vote-btn {
+      background: var(--pq-card);
+      border-color: var(--pq-line);
+      color: var(--pq-text);
+    }
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-vote-btn:hover,
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-vote-btn:focus-visible {
+      border-color: var(--pq-accent);
+      background: var(--pq-card);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--pq-accent) 25%, transparent);
+      outline: none;
+    }
+    [data-theme="navidad"] .pq-vote-btn { border-left: 6px solid var(--pq-accent-2); }
+
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-accent-btn {
+      background: var(--pq-accent);
+      color: var(--pq-on-accent);
+    }
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-reminder {
+      color: var(--pq-gold);
+      font-weight: 600;
+    }
+    [data-theme="navidad"] .pq-reminder { color: var(--pq-accent-2); }
+    [data-theme="navidad"] .pq-card { border: 2px solid var(--pq-line); }
+    .pq-tv[data-theme="navidad"] .pq-panel { border-top: 4px solid var(--pq-line); }
+    .pq-tv[data-theme="navidad"] .pq-rank-item { color: #3a1a12; }
+
+    /* ---------- TV ---------- */
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-panel { background: var(--pq-bg-2); color: var(--pq-text); }
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-rank-item { background: var(--pq-card); border: 1px solid var(--pq-line); }
+    [data-theme="halloween"] .pq-bar { background: linear-gradient(90deg, var(--pq-accent), var(--pq-gold)); }
+    [data-theme="navidad"] .pq-bar { background: repeating-linear-gradient(135deg, var(--pq-accent) 0 14px, #e8eef6 14px 22px); }
+    [data-theme="halloween"] .pq-reveal { background: linear-gradient(90deg, #e2580c, #7c3aed); color: #fff; }
+    [data-theme="navidad"] .pq-reveal { background: #b3121f; color: #fff; box-shadow: 0 0 0 4px var(--pq-gold), 0 10px 30px rgba(0,0,0,.35); }
+
+    /* Capa de efectos de la TV (canvas): encima del fondo, debajo del contenido, sin capturar clics */
+    .pq-fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+
+    :is([data-theme="halloween"], [data-theme="navidad"]) .pq-header :is(.text-gray-800, .text-gray-700) { color: #fff; }
+
+    /* --- Fondo de toda la página (el contenedor de jugador/admin no ocupa todo el ancho) --- */
+    body:has(.pq-root[data-theme="halloween"]) { background-color: #140b1f; }
+    body:has(.pq-root[data-theme="navidad"]) { background-color: #fbf3e4; }
+    body:has(.pq-tv[data-theme="navidad"]) { background-color: #0f5a33; }
+    .pq-root:is([data-theme="halloween"], [data-theme="navidad"]) { position: relative; isolation: isolate; }
+    .pq-fx { position: fixed; z-index: -1; }
+
+    /* --- Equivalencias de utilidades Tailwind dentro de cada tema (sin tocar el marcado) --- */
+    /* Jugador y TV en Halloween: oscuro -> los grises/blancos pasan a los tokens */
+    :is(.pq-player, .pq-tv)[data-theme="halloween"] :is(.text-gray-800, .text-gray-700, .text-gray-600) { color: var(--pq-text); }
+    :is(.pq-player, .pq-tv)[data-theme="halloween"] :is(.text-gray-500, .text-gray-400) { color: var(--pq-muted); }
+    .pq-player[data-theme="halloween"] :is(.bg-white, .bg-indigo-50) { background-color: var(--pq-card); }
+    .pq-player[data-theme="halloween"] .bg-gray-200 { background-color: var(--pq-line); color: var(--pq-text); }
+    .pq-player[data-theme="halloween"] :is(.border-gray-100, .border-gray-200, .border-indigo-400) { border-color: var(--pq-line); }
+    .pq-player[data-theme="halloween"] input { background-color: var(--pq-card); color: var(--pq-text); }
+    .pq-player[data-theme="halloween"] input::placeholder { color: var(--pq-muted); }
+    /* Acento en lugar del índigo (jugador y admin, ambos temas) */
+    :is(.pq-player, .pq-admin):is([data-theme="halloween"], [data-theme="navidad"]) :is(.text-indigo-600, .text-indigo-700) { color: var(--pq-accent); }
+    :is(.pq-player, .pq-admin):is([data-theme="halloween"], [data-theme="navidad"]) :is(.bg-indigo-600, .bg-indigo-700) { background-color: var(--pq-accent); color: var(--pq-on-accent); }
+    :is(.pq-player, .pq-admin):is([data-theme="halloween"], [data-theme="navidad"]) :is(.border-indigo-600, .focus\:border-indigo-600:focus, .focus\:border-indigo-500:focus) { border-color: var(--pq-accent); }
+    .pq-admin:is([data-theme="halloween"], [data-theme="navidad"]) :is(.text-indigo-600.border-indigo-600) { border-color: var(--pq-accent); }
+    /* TV: la zona de la foto deja ver el fondo (y los efectos); fichas y textos según el tema */
+    .pq-tv:is([data-theme="halloween"], [data-theme="navidad"]) .bg-black { background-color: transparent; }
+    .pq-tv:is([data-theme="halloween"], [data-theme="navidad"]) .bg-gray-900 { background-color: var(--pq-bg-2); }
+    .pq-tv:is([data-theme="halloween"], [data-theme="navidad"]) .bg-gray-800 { background-color: var(--pq-card); }
+    .pq-tv[data-theme="halloween"] .text-amber-400 { color: var(--pq-gold); }
+    /* Fondo de las barras de votos: oscuro y translúcido (no la ficha crema) para que una barra vacía se lea vacía */
+    .pq-tv:is([data-theme="halloween"], [data-theme="navidad"]) .pq-panel .bg-gray-800.h-5 { background-color: rgba(0, 0, 0, .28); }
+    .pq-tv[data-theme="navidad"] .bg-gray-800 { color: #3a1a12; }
+    .pq-tv[data-theme="navidad"] .bg-gray-800 .text-amber-400 { color: var(--pq-accent); }
+    .pq-tv[data-theme="navidad"] :is(.text-gray-400, .text-gray-500) { color: var(--pq-muted); }
+    /* Admin: fondo y cabecera del tema; las tarjetas siguen blancas (legibles y prácticas) */
+    .pq-admin[data-theme="halloween"] .pq-admin-top :is(.text-gray-800, .text-gray-500) { color: var(--pq-text); }
+    .pq-admin[data-theme="halloween"] .pq-admin-top .text-gray-500 { color: var(--pq-muted); }
+    .pq-admin[data-theme="halloween"] .pq-admin-top .border-gray-200 { border-color: var(--pq-line); }
+    .pq-admin[data-theme="halloween"] .pq-admin-top .text-indigo-600 { color: var(--pq-accent); }
   </style>
 </head>
 <body class="bg-gray-100 min-h-screen" x-data="app()" x-init="init()" x-cloak>
@@ -75,6 +233,8 @@
   <!-- ==================== TV VIEW ==================== -->
   <template x-if="view === 'tv'">
     <div class="min-h-screen bg-gray-950 text-white pq-root pq-tv" :data-theme="theme">
+      <!-- Efectos del tema (nieve / murciélagos): un canvas, solo en su tema, respeta reducir movimiento -->
+      <canvas class="pq-fx" aria-hidden="true" x-init="startThemeFx($el)"></canvas>
 
       <!-- TV: música de fondo (solo TV; nunca en el móvil). Arranca en pausa: el navegador exige un clic. -->
       <div class="fixed top-4 left-4 z-50 flex items-center gap-3 bg-black/70 text-white text-base px-4 py-2 rounded-full opacity-70 hover:opacity-100 transition">
@@ -89,7 +249,7 @@
 
       <!-- TV: Lobby -->
       <div x-show="gameState === 'lobby'" class="flex flex-col items-center justify-center min-h-screen p-8" x-init="$watch('gameState', v => { if (v === 'lobby') $nextTick(() => renderQR()) })">
-          <h1 class="text-6xl font-bold mb-4"><span x-show="theme !== 'none'" x-text="themeEmojis[0] + ' '"></span>📷 Photo Quiz<span x-show="theme !== 'none'" x-text="' ' + themeEmojis[1]"></span></h1>
+          <h1 class="text-6xl font-bold mb-4 pq-title"><span x-show="theme !== 'none'" x-text="themeEmojis[0] + ' '"></span>📷 Photo Quiz<span x-show="theme !== 'none'" x-text="' ' + themeEmojis[1]"></span></h1>
           <p class="text-gray-400 text-2xl mb-8">Esperando jugadores...</p>
           <div class="bg-white p-6 rounded-2xl mb-8">
             <canvas id="qr-canvas"></canvas>
@@ -162,7 +322,7 @@
           <!-- Ranking at bottom -->
           <div class="bg-gray-900 px-6 py-4 pq-panel">
             <div class="max-w-4xl mx-auto">
-              <h3 class="text-center text-lg font-bold mb-3">Ranking</h3>
+              <h3 class="text-center text-lg font-bold mb-3 pq-title">Ranking</h3>
               <div class="grid gap-2" :style="'grid-template-columns: repeat(' + Math.min(ranking.length, 5) + ', 1fr)'">
                 <template x-for="(p, i) in ranking" :key="p.id">
                   <div class="flex items-center gap-2 bg-gray-800 px-3 py-2 rounded-lg"
@@ -181,7 +341,7 @@
       <!-- TV: Finished -->
       <template x-if="gameState === 'finished'">
         <div class="flex flex-col items-center justify-center min-h-screen p-8">
-          <h1 class="text-5xl font-bold mb-8 fade-in-up">🏆 Resultados Finales<span x-show="theme !== 'none'" x-text="' ' + themeEmojis[0] + themeEmojis[1]"></span></h1>
+          <h1 class="text-5xl font-bold mb-8 fade-in-up pq-title">🏆 Resultados Finales<span x-show="theme !== 'none'" x-text="' ' + themeEmojis[0] + themeEmojis[1]"></span></h1>
           <div class="w-full max-w-lg space-y-4">
             <template x-for="(p, i) in ranking" :key="p.id">
               <div class="flex items-center gap-4 bg-gray-800 px-6 py-4 rounded-xl fade-in-up"
@@ -228,10 +388,11 @@
 
   <!-- ==================== ADMIN VIEW ==================== -->
   <template x-if="view === 'admin' && adminAuthenticated">
+   <div class="pq-root pq-admin min-h-screen" :data-theme="theme">
     <div class="max-w-4xl mx-auto p-4 pb-20">
       <!-- Header -->
-      <div class="flex items-center justify-between mb-4">
-        <h1 class="text-2xl font-bold text-gray-800">⚙️ Photo Quiz Admin</h1>
+      <div class="flex items-center justify-between mb-4 pq-admin-top">
+        <h1 class="text-2xl font-bold text-gray-800 pq-title">⚙️ Photo Quiz Admin</h1>
         <div class="flex items-center gap-2">
           <span class="px-3 py-1 rounded-full text-sm font-medium"
                 :class="{
@@ -248,7 +409,7 @@
       </div>
 
       <!-- Tab Navigation -->
-      <div class="flex border-b border-gray-200 mb-6">
+      <div class="flex border-b border-gray-200 mb-6 pq-admin-top">
         <button @click="adminTab = 'game'"
                 class="px-5 py-3 text-sm font-medium border-b-2 transition -mb-px"
                 :class="adminTab === 'game' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
@@ -663,6 +824,7 @@
 
       </div>
     </div>
+   </div>
   </template>
 
   <!-- ==================== PLAYER VIEW ==================== -->
@@ -679,7 +841,7 @@
       <!-- Name entry -->
       <template x-if="!playerJoined">
         <div class="flex flex-col items-center justify-center min-h-screen">
-          <h1 class="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-800 mb-2">📷 Photo Quiz</h1>
+          <h1 class="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-800 mb-2 pq-title">📷 Photo Quiz</h1>
           <p class="text-gray-800 text-xl sm:text-2xl font-semibold mb-1">✏️ ¿Cómo te llamas?</p>
           <p class="text-gray-500 mb-6 sm:text-lg">Escribe tu nombre y pulsa <b>Entrar</b></p>
           <p x-show="voteError" class="text-red-600 text-sm mb-3" x-text="voteError"></p>
@@ -698,12 +860,12 @@
       <template x-if="playerJoined">
         <div>
           <div x-show="!connected" class="mb-3 text-center text-sm bg-amber-100 text-amber-800 rounded-lg py-2">Reconectando...</div>
-          <div class="flex items-center justify-between mb-4 sm:mb-6">
+          <div class="flex items-center justify-between mb-4 sm:mb-6 pq-header">
             <div>
-              <span class="text-sm sm:text-base text-gray-500">Jugando como</span>
+              <span class="text-sm sm:text-base text-gray-500 pq-muted">Jugando como</span>
               <h2 class="font-bold text-gray-800 text-lg sm:text-xl" x-text="playerName"></h2>
             </div>
-            <span class="px-3 py-1 rounded-full text-xs sm:text-sm font-medium"
+            <span class="px-3 py-1 rounded-full text-xs sm:text-sm font-medium pq-chip"
                   :class="{
                     'bg-gray-200': gameState === 'lobby',
                     'bg-green-100 text-green-700': gameState === 'playing',
@@ -715,13 +877,13 @@
 
           <!-- Recordatorio en espera y durante la partida: arriba y en el flujo (siempre a la vista, nunca tapa nada) -->
           <p x-show="gameState === 'lobby' || gameState === 'playing' || gameState === 'revealed'" data-testid="stay-reminder"
-             class="-mt-2 mb-3 text-center text-xs sm:text-sm text-gray-500">📌 No cierres esta página ni cambies de app para no perder tu sitio</p>
+             class="-mt-2 mb-3 text-center text-xs sm:text-sm text-gray-500 pq-reminder">📌 No cierres esta página ni cambies de app para no perder tu sitio</p>
 
           <!-- Lobby waiting -->
           <div x-show="gameState === 'lobby'" class="text-center py-6 sm:py-10" data-testid="lobby-help">
-            <p class="text-2xl sm:text-3xl font-bold text-gray-800">✅ ¡Ya estás dentro!</p>
+            <p class="text-2xl sm:text-3xl font-bold text-gray-800 pq-title">✅ ¡Ya estás dentro!</p>
             <p class="text-gray-500 text-base sm:text-lg mt-1 mb-5">⏳ El juego empieza enseguida</p>
-            <div class="bg-white rounded-2xl shadow border border-gray-100 p-4 sm:p-5 text-left max-w-sm mx-auto">
+            <div class="bg-white rounded-2xl shadow border border-gray-100 p-4 sm:p-5 text-left max-w-sm mx-auto pq-card">
               <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Cómo se juega</p>
               <ul class="space-y-3 text-gray-800 text-lg leading-snug">
                 <li class="flex items-center gap-3"><span class="text-3xl w-10 text-center">📺</span><span>Mira la <b>foto</b> en la pantalla grande</span></li>
@@ -778,7 +940,7 @@
             </template>
 
             <!-- Mini ranking -->
-            <div class="mt-6 bg-white rounded-xl p-4 sm:p-6 text-left">
+            <div class="mt-6 bg-white rounded-xl p-4 sm:p-6 text-left pq-card">
               <h3 class="font-bold text-gray-700 text-sm sm:text-base mb-2">Ranking</h3>
               <template x-for="(p, i) in ranking" :key="p.id">
                 <div class="flex items-center gap-2 py-1 sm:py-2 text-sm sm:text-base" :class="p.id === playerId ? 'font-bold text-indigo-700' : ''">
@@ -795,7 +957,7 @@
             <h2 class="text-2xl sm:text-3xl font-bold text-center mb-6">🏆 Resultados Finales</h2>
             <div class="space-y-2 sm:space-y-3">
               <template x-for="(p, i) in ranking" :key="p.id">
-                <div class="flex items-center gap-3 bg-white px-4 sm:px-6 py-3 sm:py-4 rounded-xl"
+                <div class="flex items-center gap-3 bg-white px-4 sm:px-6 py-3 sm:py-4 rounded-xl pq-card"
                      :class="{'ring-2 ring-amber-400': i < 3, 'font-bold bg-indigo-50': p.id === playerId}">
                   <span class="text-xl sm:text-2xl w-8 sm:w-10 text-center" x-text="i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i+1)"></span>
                   <span class="flex-1 sm:text-lg" x-text="p.name + (p.id === playerId ? ' (tú)' : '')"></span>
@@ -809,6 +971,149 @@
     </div>
   </template>
 
+  <script>
+    /* Efectos de fondo de la TV por tema: nieve (navidad) y murciélagos (halloween). Un solo canvas y un
+       bucle requestAnimationFrame; solo se crea en su tema (coste cero en los demás) y se desactiva con
+       prefers-reduced-motion. */
+    (function (global) {
+      const reduceMotion = () => global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      function fitCanvas(canvas, ctx) {
+        const dpr = Math.min(global.devicePixelRatio || 1, 2);
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return { w, h };
+      }
+
+      // ---- Nieve: copos de 3 tamaños (parallax), deriva lateral suave ----
+      function snow(size) {
+        const count = Math.round(Math.min(160, (size.w * size.h) / 9000));
+        const flakes = Array.from({ length: count }, () => newFlake(size, true));
+        function newFlake(s, anywhere) {
+          const depth = Math.random();             // 0 = lejos (pequeño, lento), 1 = cerca
+          return {
+            x: Math.random() * s.w,
+            y: anywhere ? Math.random() * s.h : -10,
+            r: 0.8 + depth * 2.6,
+            vy: 12 + depth * 38,                    // px/s
+            sway: 8 + Math.random() * 18,
+            phase: Math.random() * Math.PI * 2,
+            a: 0.35 + depth * 0.55,
+          };
+        }
+        return {
+          step(ctx, s, dt, t) {
+            ctx.clearRect(0, 0, s.w, s.h);
+            ctx.fillStyle = '#ffffff';
+            for (const f of flakes) {
+              f.y += f.vy * dt;
+              const x = f.x + Math.sin(t * 0.6 + f.phase) * f.sway;
+              if (f.y - f.r > s.h) Object.assign(f, newFlake(s, false));
+              ctx.globalAlpha = f.a;
+              ctx.beginPath();
+              ctx.arc(x, f.y, f.r, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+          },
+          resize(s) { for (const f of flakes) { f.x = Math.random() * s.w; } },
+        };
+      }
+
+      // ---- Murciélagos: pocos (4-6), cruzan despacio por la parte alta, aleteo ----
+      function bats(size) {
+        const count = size.w > 900 ? 6 : 4;
+        const list = Array.from({ length: count }, (_, i) => newBat(size, i * (size.w / count)));
+        function newBat(s, startX) {
+          const dir = Math.random() < 0.5 ? 1 : -1;
+          const scale = 0.6 + Math.random() * 0.9;
+          return {
+            dir, scale,
+            x: startX !== undefined ? startX : (dir > 0 ? -60 : s.w + 60),
+            baseY: s.h * (0.06 + Math.random() * 0.42),
+            vx: (40 + Math.random() * 50) * scale,  // px/s
+            bob: 10 + Math.random() * 20,
+            flap: 7 + Math.random() * 4,            // aleteos por segundo (rad/s ~ x2π)
+            phase: Math.random() * Math.PI * 2,
+          };
+        }
+        function drawBat(ctx, x, y, sc, wing, dir) {
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.scale(sc * dir, sc);
+          const lift = wing * 10;                   // -10..10: alas arriba/abajo
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.quadraticCurveTo(-10, -6 - lift, -24, -2 - lift * 1.4);
+          ctx.quadraticCurveTo(-19, 2, -14, 1);
+          ctx.quadraticCurveTo(-11, 5, -7, 3);
+          ctx.quadraticCurveTo(-4, 6, 0, 4);
+          ctx.quadraticCurveTo(4, 6, 7, 3);
+          ctx.quadraticCurveTo(11, 5, 14, 1);
+          ctx.quadraticCurveTo(19, 2, 24, -2 - lift * 1.4);
+          ctx.quadraticCurveTo(10, -6 - lift, 0, 0);
+          ctx.fill();
+          ctx.beginPath();                          // cabeza con orejas
+          ctx.moveTo(-3, -1); ctx.lineTo(-3, -6); ctx.lineTo(-1, -3); ctx.lineTo(1, -3); ctx.lineTo(3, -6); ctx.lineTo(3, -1);
+          ctx.fill();
+          ctx.restore();
+        }
+        return {
+          step(ctx, s, dt, t) {
+            ctx.clearRect(0, 0, s.w, s.h);
+            ctx.fillStyle = 'rgba(8, 3, 14, 0.92)';
+            ctx.shadowColor = 'rgba(255, 140, 40, 0.35)'; // leve contraluz naranja para que se vean en lo oscuro
+            ctx.shadowBlur = 6;
+            for (let i = 0; i < list.length; i++) {
+              const b = list[i];
+              b.x += b.vx * b.dir * dt;
+              const y = b.baseY + Math.sin(t * 1.3 + b.phase) * b.bob;
+              drawBat(ctx, b.x, y, b.scale * 1.3, Math.sin(t * b.flap + b.phase), b.dir);
+              if ((b.dir > 0 && b.x > s.w + 80) || (b.dir < 0 && b.x < -80)) list[i] = newBat(s);
+            }
+            ctx.shadowBlur = 0;
+          },
+          resize() {},
+        };
+      }
+
+      const EFFECTS = { navidad: snow, halloween: bats };
+
+      function start(canvas, theme) {
+        const make = EFFECTS[theme];
+        if (!canvas || !make) return () => {};                  // tema sin efecto: no se crea nada
+        const ctx = canvas.getContext('2d');
+        let size = fitCanvas(canvas, ctx);
+        const fx = make(size);
+        let raf = 0, last = 0, running = false;
+        const mq = global.matchMedia ? global.matchMedia('(prefers-reduced-motion: reduce)') : null;
+
+        function frame(now) {
+          const dt = Math.min(0.05, last ? (now - last) / 1000 : 0); // máx. 50 ms por paso
+          last = now;
+          fx.step(ctx, size, dt, now / 1000);
+          raf = global.requestAnimationFrame(frame);
+        }
+        function play() { if (running || reduceMotion()) return; running = true; last = 0; raf = global.requestAnimationFrame(frame); }
+        function pause() { running = false; global.cancelAnimationFrame(raf); ctx.clearRect(0, 0, size.w, size.h); }
+        const onMotion = () => (reduceMotion() ? pause() : play());
+        const ro = global.ResizeObserver ? new ResizeObserver(() => { size = fitCanvas(canvas, ctx); fx.resize(size); }) : null;
+
+        if (ro) ro.observe(canvas);
+        if (mq && mq.addEventListener) mq.addEventListener('change', onMotion);
+        play();
+        return function stop() {
+          pause();
+          if (ro) ro.disconnect();
+          if (mq && mq.removeEventListener) mq.removeEventListener('change', onMotion);
+        };
+      }
+
+      global.PQThemeFx = { start };
+    })(window);
+  </script>
   <script>
     function app() {
       // Storage can throw (private mode, blocked site data): never let that break the game.
@@ -1305,6 +1610,14 @@
         },
 
         // --- Temática / música (TV) ---
+        // TV: arranca/para el efecto del tema actual y lo cambia en vivo si el admin cambia de tema
+        startThemeFx(canvas) {
+          let stop = () => {};
+          const run = () => { stop(); stop = window.PQThemeFx ? window.PQThemeFx.start(canvas, this.theme) : () => {}; };
+          run();
+          this.$watch('theme', run);
+        },
+
         async saveAuto(body) {
           const res = await this.adminFetch('/api/admin/auto', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

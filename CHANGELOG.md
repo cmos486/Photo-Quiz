@@ -1,5 +1,19 @@
 # Changelog — rama review-evento
 
+## Temas v2 (Halloween y Navidad)
+
+- Cada tema cambia colores, fondos y títulos en **TV, móvil y admin**, no solo los iconos. `none` no cambia.
+- **Halloween**: noche morada, naranja calabaza, títulos en *Creepster*. **Navidad**: crema, rojo, verde abeto
+  y dorado, títulos en *Mountains of Christmas*; móvil claro con cabecera roja y franja de bastón de caramelo;
+  TV verde abeto con guirnalda de luces.
+- **TV**: murciélagos (Halloween) o nieve (Navidad) en un único canvas con `requestAnimationFrame`; solo existen
+  en su tema, cambian en vivo con el tema y respetan `prefers-reduced-motion`. Móvil y admin sin animaciones.
+- Sistema: tokens CSS por tema y vista (`--pq-bg`, `--pq-card`, `--pq-accent`…), clases `pq-*` y
+  equivalencias de utilidades de Tailwind acotadas al tema, sin cambiar la lógica del juego.
+- Las tipografías se cargan sin bloquear el render (antes un `<link>` bloqueante habría retrasado la página
+  entera con mala conexión).
+- `samples/`: muestra de diseño de la fase 1 (no la carga la app).
+
 ## Ayuda en el panel y para los jugadores
 
 - **Pestaña «Ayuda» en el admin** (solo tras el login): flujo de un evento, consejo para evitar duplicados
