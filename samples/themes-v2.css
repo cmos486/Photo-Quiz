@@ -30,31 +30,44 @@
              radial-gradient(70% 60% at 0% 100%, rgba(155, 92, 255, .14), transparent 70%);
 }
 
-/* ---------- NAVIDAD: blanco nieve (móvil/admin) y azul noche (TV); rojo, verde y oro ---------- */
+/* ---------- NAVIDAD (v2): crema cálido, rojo y verde abeto, dorado; nada de azul noche ---------- */
 .pq-root[data-theme="navidad"] {
-  --pq-bg: #eef4fb;
-  --pq-bg-2: #0f2748;
+  --pq-bg: #fbf3e4;            /* crema/papel de regalo */
+  --pq-bg-2: #b3121f;          /* rojo navidad (cabecera) */
   --pq-card: #ffffff;
-  --pq-line: #d5e1ee;
-  --pq-text: #0f2340;
-  --pq-muted: #5b708c;
-  --pq-accent: #c4202f;
-  --pq-accent-2: #17834c;
+  --pq-line: #e7cf9a;          /* borde dorado suave */
+  --pq-text: #3a1a12;          /* marrón chocolate, más cálido que el negro */
+  --pq-muted: #7a5a48;
+  --pq-accent: #c4202f;        /* rojo */
+  --pq-accent-2: #146b3a;      /* verde abeto */
   --pq-gold: #c9952b;
   --pq-on-accent: #ffffff;
   --pq-display: "Mountains of Christmas", "Georgia", serif;
-  --pq-glow: linear-gradient(180deg, rgba(15, 39, 72, .06), transparent 240px);
+  /* acebo sutil en las esquinas */
+  --pq-glow: radial-gradient(circle at 0 0, rgba(20, 107, 58, .12) 0 90px, transparent 91px),
+             radial-gradient(circle at 100% 100%, rgba(196, 32, 47, .10) 0 110px, transparent 111px);
 }
-/* La TV de Navidad es de noche: mismos acentos, fondo azul noche */
+/* TV de Navidad: verde abeto con guirnalda de luces arriba (rojo/oro/verde) */
 .pq-tv[data-theme="navidad"] {
-  --pq-bg: #0a1a30;
-  --pq-bg-2: #10284a;
-  --pq-card: #143258;
-  --pq-line: #24497a;
-  --pq-text: #f4f8ff;
-  --pq-muted: #a9bdd8;
+  --pq-bg: #0f5a33;
+  --pq-bg-2: #a3141f;          /* panel inferior rojo */
+  --pq-card: #fff6e6;          /* fichas de ranking crema */
+  --pq-line: #e2b950;
+  --pq-text: #fff8ec;
+  --pq-muted: #f3e3c3;
   --pq-on-accent: #ffffff;
-  --pq-glow: radial-gradient(80% 60% at 50% 0%, rgba(201, 149, 43, .18), transparent 70%);
+  --pq-glow: radial-gradient(70% 60% at 50% 35%, #187a45, transparent 75%);
+}
+/* Guirnalda de luces (oro, rojo, verde) colgando arriba + resplandor central. Va en una regla propia:
+   posición y tamaño de cada capa no caben en background-image. */
+.pq-root.pq-tv[data-theme="navidad"] {
+  background:
+    radial-gradient(circle, #ffd45c 0 7px, rgba(255, 212, 92, .4) 8px 14px, transparent 15px) 0 4px / 150px 34px repeat-x,
+    radial-gradient(circle, #ff4d4d 0 7px, rgba(255, 77, 77, .4) 8px 14px, transparent 15px) 50px 4px / 150px 34px repeat-x,
+    radial-gradient(circle, #8dffab 0 7px, rgba(141, 255, 171, .35) 8px 14px, transparent 15px) 100px 4px / 150px 34px repeat-x,
+    linear-gradient(#0b3d22, #0b3d22) 0 20px / 100% 2px repeat-x,
+    var(--pq-glow),
+    var(--pq-bg);
 }
 
 /* ---------- Reglas comunes a los dos temas (todo sale de los tokens) ---------- */
@@ -71,7 +84,7 @@
 }
 [data-theme="halloween"] .pq-title { color: var(--pq-accent); text-shadow: 0 2px 0 #000, 0 0 18px rgba(255, 123, 28, .35); }
 [data-theme="navidad"] .pq-title { color: var(--pq-accent); font-weight: 700; }
-.pq-tv[data-theme="navidad"] .pq-title { color: var(--pq-gold); text-shadow: 0 0 20px rgba(201, 149, 43, .35); }
+.pq-tv[data-theme="navidad"] .pq-title { color: #ffe08a; font-weight: 700; text-shadow: 0 2px 0 #7a0d15, 0 0 18px rgba(255, 224, 138, .45); }
 
 :is([data-theme="halloween"], [data-theme="navidad"]) .pq-text { color: var(--pq-text); }
 :is([data-theme="halloween"], [data-theme="navidad"]) .pq-muted { color: var(--pq-muted); }
@@ -84,7 +97,11 @@
   padding: .75rem 1rem;
 }
 [data-theme="halloween"] .pq-header { border: 1px solid var(--pq-line); }
-[data-theme="navidad"] .pq-header { border-bottom: 3px solid var(--pq-gold); }
+[data-theme="navidad"] .pq-header {
+  /* banda roja con ribete de bastón de caramelo */
+  background: repeating-linear-gradient(135deg, #fff 0 7px, var(--pq-accent-2) 7px 14px) bottom / 100% 6px no-repeat, var(--pq-bg-2);
+  padding-bottom: calc(.75rem + 6px);
+}
 :is([data-theme="halloween"], [data-theme="navidad"]) .pq-header .pq-muted { color: rgba(255, 255, 255, .7); }
 
 :is([data-theme="halloween"], [data-theme="navidad"]) .pq-chip {
@@ -120,7 +137,10 @@
   color: var(--pq-gold);
   font-weight: 600;
 }
-[data-theme="navidad"] .pq-reminder { color: var(--pq-accent); }
+[data-theme="navidad"] .pq-reminder { color: var(--pq-accent-2); }
+[data-theme="navidad"] .pq-card { border: 2px solid var(--pq-line); }
+.pq-tv[data-theme="navidad"] .pq-panel { border-top: 4px solid var(--pq-line); }
+.pq-tv[data-theme="navidad"] .pq-rank-item { color: #3a1a12; }
 
 /* ---------- TV ---------- */
 :is([data-theme="halloween"], [data-theme="navidad"]) .pq-panel { background: var(--pq-bg-2); color: var(--pq-text); }
@@ -128,7 +148,7 @@
 [data-theme="halloween"] .pq-bar { background: linear-gradient(90deg, var(--pq-accent), var(--pq-gold)); }
 [data-theme="navidad"] .pq-bar { background: repeating-linear-gradient(135deg, var(--pq-accent) 0 14px, #e8eef6 14px 22px); }
 [data-theme="halloween"] .pq-reveal { background: linear-gradient(90deg, #e2580c, #7c3aed); color: #fff; }
-[data-theme="navidad"] .pq-reveal { background: linear-gradient(90deg, #b3121f, #15803d); color: #fff; box-shadow: 0 0 0 3px var(--pq-gold); }
+[data-theme="navidad"] .pq-reveal { background: #b3121f; color: #fff; box-shadow: 0 0 0 4px var(--pq-gold), 0 10px 30px rgba(0,0,0,.35); }
 
 /* Capa de efectos de la TV (canvas): encima del fondo, debajo del contenido, sin capturar clics */
 .pq-fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
