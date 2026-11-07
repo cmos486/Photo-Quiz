@@ -110,6 +110,14 @@ try {
 } catch {
   db.exec("ALTER TABLE session ADD COLUMN theme TEXT DEFAULT 'none'");
 }
+// Migration: automatic advance settings (auto_mode 0 = manual, the default)
+for (const [col, def] of [['auto_mode', 0], ['auto_delay_s', 3], ['auto_timeout_s', 60]]) {
+  try { db.prepare(`SELECT ${col} FROM session LIMIT 1`).get(); }
+  catch { db.exec(`ALTER TABLE session ADD COLUMN ${col} INTEGER DEFAULT ${def}`); }
+}
+const AUTO_DELAY_RANGE = [1, 10];     // seconds between reveal and next photo
+const AUTO_TIMEOUT_RANGE = [10, 600]; // safety net: max seconds per photo before forced reveal
+
 // Merged players: a browser that still holds a merged (deleted) playerId is redirected to
 // the player it was merged into, so the duplicate never comes back on reconnect.
 db.exec(`CREATE TABLE IF NOT EXISTS player_aliases (
@@ -449,6 +457,7 @@ function statePayload(state) {
     authors: state.authors.map(a => ({ id: a.id, name: a.name })),
     theme: state.session.theme || 'none',
     musicUrl: musicUrl(state.session.theme || 'none'),
+    ...autoInfo(state.session),
   };
 }
 
@@ -503,7 +512,7 @@ app.get('/api/admin/whoami', requireAdmin, (req, res) => {
 app.get('/api/state', (req, res) => {
   const state = getFullState();
   const theme = state.session.theme || 'none';
-  res.json({ ...state, currentPhotoAuthorName: revealedAuthorName(state), maxUploadMB: MAX_UPLOAD_MB, theme, musicUrl: musicUrl(theme) });
+  res.json({ ...state, currentPhotoAuthorName: revealedAuthorName(state), maxUploadMB: MAX_UPLOAD_MB, theme, musicUrl: musicUrl(theme), ...autoInfo(state.session) });
 });
 
 // ---- All routes below require admin auth ----
@@ -594,18 +603,19 @@ app.post('/api/game/start', requireAdmin, (req, res) => {
   stmts.updatePhotoIndex.run(0);
   db.prepare('UPDATE session SET archived = 0 WHERE id = 1').run();
   stmts.updateState.run('playing');
+  autoTick();
   broadcastState();
   res.json({ ok: true, totalPhotos: shuffled.length });
 });
 
 // Reveal author
-app.post('/api/game/reveal', requireAdmin, (req, res) => {
+function doReveal() {
   const session = stmts.getSession.get();
-  if (session.state !== 'playing') return res.status(400).json({ error: 'No está en juego' });
+  if (session.state !== 'playing') return { status: 400, error: 'No está en juego' };
 
   const photos = stmts.getPhotos.all();
   const currentPhoto = photos[session.current_photo_index];
-  if (!currentPhoto) return res.status(400).json({ error: 'No hay foto actual' });
+  if (!currentPhoto) return { status: 400, error: 'No hay foto actual' };
 
   const author = db.prepare('SELECT * FROM authors WHERE id = ?').get(currentPhoto.author_id);
 
@@ -642,38 +652,45 @@ app.post('/api/game/reveal', requireAdmin, (req, res) => {
     ranking,
   });
 
+  autoTick();
   broadcastState();
-  res.json({ ok: true, authorName: author ? author.name : 'Desconocido' });
-});
+  return { ok: true, authorName: author ? author.name : 'Desconocido' };
+}
+const sendResult = (res, r) => (r.ok ? res.json(r) : res.status(r.status).json({ error: r.error }));
+app.post('/api/game/reveal', requireAdmin, (req, res) => sendResult(res, doReveal()));
 
 // Next photo
-app.post('/api/game/next', requireAdmin, (req, res) => {
+function doNext() {
   const session = stmts.getSession.get();
-  if (session.state !== 'revealed') return res.status(400).json({ error: 'Revela la foto actual antes de pasar a la siguiente' });
+  if (session.state !== 'revealed') return { status: 400, error: 'Revela la foto actual antes de pasar a la siguiente' };
   const photos = stmts.getPhotos.all();
   const nextIndex = session.current_photo_index + 1;
 
   if (nextIndex >= photos.length) {
-    return res.status(400).json({ error: 'No hay más fotos' });
+    return { status: 400, error: 'No hay más fotos' };
   }
 
   stmts.updatePhotoIndex.run(nextIndex);
   stmts.updateState.run('playing');
+  autoTick();
   broadcastState();
-  res.json({ ok: true, photoIndex: nextIndex, totalPhotos: photos.length });
-});
+  return { ok: true, photoIndex: nextIndex, totalPhotos: photos.length };
+}
+app.post('/api/game/next', requireAdmin, (req, res) => sendResult(res, doNext()));
 
 // Finish game
-app.post('/api/game/finish', requireAdmin, (req, res) => {
+function doFinish() {
   const current = stmts.getSession.get();
-  if (current.state === 'lobby') return res.status(400).json({ error: 'No hay partida en curso' });
+  if (current.state === 'lobby') return { status: 400, error: 'No hay partida en curso' };
   if (current.state !== 'finished') archiveGame();
   stmts.updateState.run('finished');
+  autoTick(); // clears any pending automatic timer
   const ranking = stmts.getPlayers.all();
   io.emit('game_finished', { ranking });
   broadcastState();
-  res.json({ ok: true, ranking });
-});
+  return { ok: true, ranking };
+}
+app.post('/api/game/finish', requireAdmin, (req, res) => sendResult(res, doFinish()));
 
 // Reset game
 app.post('/api/game/reset', requireAdmin, (req, res) => {
@@ -684,6 +701,7 @@ app.post('/api/game/reset', requireAdmin, (req, res) => {
     db.prepare('UPDATE players SET score = 0').run();
   });
   resetAll();
+  autoTick(); // lobby: clears any pending automatic timer
   broadcastState();
   res.json({ ok: true });
 });
@@ -702,6 +720,7 @@ app.post('/api/admin/purge', requireAdmin, (req, res) => {
   const includeHistory = req.body && req.body.includeHistory === true;
   purgeAllData(includeHistory);
   connectedPlayers.clear();
+  autoTick();
   broadcastState();
   res.json({ ok: true });
 });
@@ -710,6 +729,35 @@ app.post('/api/admin/purge', requireAdmin, (req, res) => {
 app.get('/api/admin/auto-purge', requireAdmin, (req, res) => {
   const session = db.prepare('SELECT auto_purge_days FROM session WHERE id = 1').get();
   res.json({ autoPurgeDays: session ? session.auto_purge_days : 0 });
+});
+
+// --- Admin: automatic advance (mode can be switched in the middle of a game) ---
+app.post('/api/admin/auto', requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const cur = stmts.getSession.get();
+  let mode = cur.auto_mode, delay = cur.auto_delay_s, timeout = cur.auto_timeout_s;
+  if (b.mode !== undefined) {
+    if (b.mode !== 'manual' && b.mode !== 'auto') return res.status(400).json({ error: 'Modo no válido (manual, auto)' });
+    mode = b.mode === 'auto' ? 1 : 0;
+  }
+  if (b.delay !== undefined) {
+    if (!Number.isInteger(b.delay) || b.delay < AUTO_DELAY_RANGE[0] || b.delay > AUTO_DELAY_RANGE[1]) {
+      return res.status(400).json({ error: `Delay entre ${AUTO_DELAY_RANGE[0]} y ${AUTO_DELAY_RANGE[1]} s` });
+    }
+    delay = b.delay;
+  }
+  if (b.timeout !== undefined) {
+    if (!Number.isInteger(b.timeout) || b.timeout < AUTO_TIMEOUT_RANGE[0] || b.timeout > AUTO_TIMEOUT_RANGE[1]) {
+      return res.status(400).json({ error: `Timeout entre ${AUTO_TIMEOUT_RANGE[0]} y ${AUTO_TIMEOUT_RANGE[1]} s` });
+    }
+    timeout = b.timeout;
+  }
+  db.prepare('UPDATE session SET auto_mode = ?, auto_delay_s = ?, auto_timeout_s = ? WHERE id = 1').run(mode, delay, timeout);
+  // New delay/timeout apply to the next timer; a mode change acts now (cancel, or resume)
+  if (mode !== cur.auto_mode) clearAutoTimer();
+  autoTick();
+  broadcastState();
+  res.json({ ok: true, ...autoInfo(stmts.getSession.get()) });
 });
 
 // --- Admin: visual theme (cosmetic; broadcast so TV/players update without reloading)
@@ -828,6 +876,7 @@ app.post('/api/admin/players/merge', requireAdmin, (req, res) => {
     const s = io.sockets.sockets.get(sid);
     if (s) sendVoteStatus(s, targetId);
   }
+  autoTick(); // merged votes can complete "everyone voted"
   console.log(`[Merge] ${unique.length} player(s) merged into ${result.target.name}: ${result.movedVotes} votes moved, ${result.droppedVotes} duplicate(s) dropped`);
   broadcastState();
   res.json({ ok: true, player: result.target, movedVotes: result.movedVotes, droppedVotes: result.droppedVotes });
@@ -854,6 +903,77 @@ function safeHandler(name, fn) {
     try { fn(...args); } catch (err) { console.error(`[Socket:${name}]`, err.message); }
   };
 }
+
+// --- Automatic advance engine (server-side, so TV/admin/players stay consistent) ---
+// One pending timer at most, tagged with the phase and photo it belongs to:
+//   playing  -> 'reveal:<photoId>' safety timeout (reveal even if votes are missing)
+//   revealed -> 'next:<photoId>'   delay, then next photo (or finish after the last one)
+// autoTick() is called after anything that can change the outcome (votes, joins, disconnects,
+// manual actions, mode changes). Timers re-validate the state when they fire, so a stale timer
+// can never act on a photo/game it wasn't created for (no double advance).
+let autoTimer = null; // { key, handle, deadline }
+function clearAutoTimer() {
+  if (autoTimer) clearTimeout(autoTimer.handle);
+  autoTimer = null;
+}
+function setAutoTimer(key, ms, fn) {
+  if (autoTimer && autoTimer.key === key) return; // already scheduled for this photo/phase
+  clearAutoTimer();
+  const t = { key, deadline: Date.now() + ms };
+  t.handle = setTimeout(() => {
+    if (autoTimer !== t) return;
+    autoTimer = null;
+    try { fn(); } catch (err) { console.error('[Auto]', err.message); }
+  }, ms);
+  autoTimer = t;
+}
+function autoInfo(session) {
+  return {
+    autoMode: session.auto_mode ? 'auto' : 'manual',
+    autoDelay: session.auto_delay_s,
+    autoTimeout: session.auto_timeout_s,
+    // What the automatic mode will do next and in how many ms (for countdowns in the UI)
+    autoPending: autoTimer ? { action: autoTimer.key.split(':')[0], inMs: Math.max(0, autoTimer.deadline - Date.now()) } : null,
+  };
+}
+function autoTick() {
+  const session = stmts.getSession.get();
+  if (!session.auto_mode || (session.state !== 'playing' && session.state !== 'revealed')) { clearAutoTimer(); return; }
+  const photos = stmts.getPhotos.all();
+  const photo = photos[session.current_photo_index];
+  if (!photo) { clearAutoTimer(); return; }
+
+  if (session.state === 'playing') {
+    // "Everyone" = players connected right now (same notion as the TV vote counter). With nobody
+    // connected (server restart, total wifi drop) we don't guess: the safety timeout covers it.
+    const voters = new Set(stmts.getVotesForPhoto.all(photo.id).map(v => v.player_id));
+    const online = [...connectedPlayers.keys()];
+    if (online.length > 0 && online.every(id => voters.has(id))) {
+      clearAutoTimer();
+      console.log(`[Auto] all ${online.length} connected player(s) voted photo ${session.current_photo_index + 1}: reveal`);
+      doReveal();
+      return;
+    }
+    setAutoTimer(`reveal:${photo.id}`, session.auto_timeout_s * 1000, () => {
+      const s = stmts.getSession.get();
+      const cur = stmts.getPhotos.all()[s.current_photo_index];
+      if (!s.auto_mode || s.state !== 'playing' || !cur || cur.id !== photo.id) return autoTick();
+      console.log(`[Auto] safety timeout (${s.auto_timeout_s}s) on photo ${s.current_photo_index + 1}: reveal`);
+      doReveal();
+    });
+  } else {
+    setAutoTimer(`next:${photo.id}`, session.auto_delay_s * 1000, () => {
+      const s = stmts.getSession.get();
+      const all = stmts.getPhotos.all();
+      const cur = all[s.current_photo_index];
+      if (!s.auto_mode || s.state !== 'revealed' || !cur || cur.id !== photo.id) return autoTick();
+      if (s.current_photo_index + 1 >= all.length) { console.log('[Auto] last photo: finish'); doFinish(); }
+      else doNext();
+    });
+  }
+}
+// A disconnect can complete "everyone voted"; wait briefly so a page reload isn't counted as leaving
+function autoTickSoon() { setTimeout(() => { try { autoTick(); broadcastState(); } catch (e) { console.error('[Auto]', e.message); } }, 1500); }
 
 // Tell a player's socket if it already voted for the current photo, and the result if revealed
 function sendVoteStatus(socket, playerId) {
@@ -909,6 +1029,7 @@ io.on('connection', (socket) => {
     socket.emit('joined', { playerId: finalId, name: finalName });
 
     sendVoteStatus(socket, finalId);
+    autoTick();
     broadcastState();
   }));
 
@@ -949,6 +1070,7 @@ io.on('connection', (socket) => {
       totalVoters: votes.length,
       totalPlayers: expectedVoters(votes),
     });
+    if (session.auto_mode) autoTick();
   }));
 
   socket.on('disconnect', () => {
@@ -956,6 +1078,7 @@ io.on('connection', (socket) => {
     if (socket.playerId) {
       removeConnection(socket);
       io.emit('players_online', { online: [...connectedPlayers.keys()] });
+      if (stmts.getSession.get().auto_mode) autoTickSoon();
     }
   });
 });
@@ -977,5 +1100,6 @@ process.on('unhandledRejection', (err) => console.error('[unhandledRejection]', 
 // --- Start ---
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Photo Quiz server running on port ${PORT}`);
+  autoTick(); // resume automatic mode after a restart (arms the safety timeout)
   console.log(`Admin password: ${ADMIN_PASSWORD === 'photoquiz' ? 'DEFAULT (photoquiz) — change ADMIN_PASSWORD env var!' : 'custom (set via env)'}`);
 });

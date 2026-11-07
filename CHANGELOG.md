@@ -1,5 +1,33 @@
 # Changelog — rama review-evento
 
+## Modo automático de avance
+
+- **Modo manual** (por defecto, sin cambios): el admin revela y pasa de foto.
+- **Modo automático**: lo decide el SERVIDOR.
+  - **Revelación**: cuando todos los jugadores conectados ahora mismo han votado (la misma noción de
+    «conectados» que el contador de votos de la TV), revela solo.
+  - **Avance**: tras un delay configurable pasa a la siguiente foto; tras la última, va al ranking final.
+  - **Botones manuales**: siguen activos y se adelantan; el automático respeta lo que hizo el admin.
+  - **Red de seguridad**: un tiempo máximo por foto (por defecto 60 s) revela aunque falten votos. Si no
+    queda nadie conectado no se revela por votos; espera a esa red.
+  - **Desconexiones**: si un jugador se desconecta y con eso ya han votado todos los demás, revela. Se
+    espera 1,5 s para no contar una recarga de página como irse.
+- **Un solo temporizador pendiente**, etiquetado con fase y foto (`reveal:<foto>` / `next:<foto>`), que
+  vuelve a validar el estado al dispararse.
+  - Revelar o pasar a mano, cambiar de modo, terminar, resetear o «Borrar todo» lo cancelan.
+  - No hay doble avance ni temporizadores huérfanos.
+  - Tras reiniciar el servidor, el modo automático se reanuda.
+- **Ajustes** (`POST /api/admin/auto`, con auth de admin; se guardan en `session`):
+  - Modo `manual` / `auto`.
+  - Pausa tras revelar: 1-10 s, por defecto 3.
+  - Tiempo máximo por foto: 10-600 s, por defecto 60.
+- **Interruptor en caliente** en la pestaña Juego del admin.
+- **Cuenta atrás**:
+  - TV: «Siguiente foto en N s» / «Ranking final en N s».
+  - Admin: además, el tiempo máximo restante.
+  - `state_update` y `/api/state` incluyen `autoMode`, `autoDelay`, `autoTimeout` y `autoPending`.
+- `test-auto-advance.js`: prueba de tiempos, bloqueos, carreras y temporizadores (solo en local).
+
 ## Identidad del jugador y fusión de duplicados
 
 Contexto: en el evento, quien escaneaba el QR desde la app de la cámara jugaba en una vista de navegador

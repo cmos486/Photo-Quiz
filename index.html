@@ -149,6 +149,9 @@
             <div class="absolute top-4 right-6 text-gray-400 text-sm bg-black/60 px-3 py-1 rounded-full">
               Foto <span x-text="currentPhotoIndex + 1"></span> / <span x-text="totalPhotos"></span>
             </div>
+            <div x-show="autoMode === 'auto' && autoPending && autoPending.action === 'next'"
+                 class="absolute top-4 left-1/2 -translate-x-1/2 text-white text-lg bg-black/60 px-4 py-1 rounded-full"
+                 x-text="(currentPhotoIndex >= totalPhotos - 1 ? 'Ranking final en ' : 'Siguiente foto en ') + autoSecondsLeft + ' s'"></div>
             <div class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-gradient-to-r from-amber-500 to-orange-500 px-8 py-3 rounded-2xl photo-reveal shadow-2xl pq-reveal">
               <div class="text-2xl font-bold text-center" x-text="'📸 ' + revealedAuthorName + (theme !== 'none' ? ' ' + themeEmojis[0] : '')"></div>
             </div>
@@ -359,7 +362,21 @@
 
         <!-- Game Controls -->
         <div class="bg-white rounded-xl shadow p-4 mb-4">
-          <h2 class="font-bold text-gray-700 mb-3">Control del Juego</h2>
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h2 class="font-bold text-gray-700">Control del Juego</h2>
+            <button @click="saveAuto({ mode: autoMode === 'auto' ? 'manual' : 'auto' })" data-testid="auto-switch"
+                    class="flex items-center gap-2 text-sm px-3 py-1 rounded-full border transition"
+                    :class="autoMode === 'auto' ? 'bg-amber-100 border-amber-400 text-amber-800' : 'bg-gray-100 border-gray-300 text-gray-600'">
+              <span class="w-8 h-4 rounded-full relative transition" :class="autoMode === 'auto' ? 'bg-amber-500' : 'bg-gray-400'">
+                <span class="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all" :class="autoMode === 'auto' ? 'left-4' : 'left-0.5'"></span>
+              </span>
+              <span x-text="autoMode === 'auto' ? '⚡ Automático' : '✋ Manual'"></span>
+            </button>
+          </div>
+          <p x-show="autoMode === 'auto' && autoPending" class="text-sm text-amber-700 mb-2"
+             x-text="autoPending && autoPending.action === 'next'
+               ? (currentPhotoIndex >= totalPhotos - 1 ? 'Ranking final en ' : 'Siguiente foto en ') + autoSecondsLeft + ' s'
+               : 'Revelará al votar todos los conectados (máximo ' + autoSecondsLeft + ' s)'"></p>
           <div class="flex flex-wrap gap-2">
             <button @click="gameAction('start')" x-show="gameState === 'lobby'"
                     :disabled="photos.length === 0"
@@ -477,6 +494,35 @@
               Guardar
             </button>
           </div>
+        </div>
+
+        <!-- Avance automático -->
+        <div class="bg-white rounded-xl shadow p-4 mb-4">
+          <h2 class="font-bold text-gray-700 mb-2">Modo de avance</h2>
+          <p class="text-xs text-gray-400 mb-3">Manual: tú revelas y pasas de foto. Automático: cuando han votado todos los jugadores conectados se revela solo y, tras el delay, pasa a la siguiente (en la última, al ranking final). Los botones manuales siempre funcionan. También se cambia en caliente desde la pestaña Juego.</p>
+          <div class="flex flex-wrap gap-2 mb-3">
+            <template x-for="opt in [{ v: 'manual', label: '✋ Manual' }, { v: 'auto', label: '⚡ Automático' }]" :key="opt.v">
+              <button @click="saveAuto({ mode: opt.v })"
+                      class="px-3 py-1.5 rounded-lg text-sm border transition"
+                      :class="autoMode === opt.v ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300 hover:border-indigo-400'">
+                <span x-text="opt.label"></span>
+              </button>
+            </template>
+          </div>
+          <div class="flex flex-wrap items-end gap-4 text-sm">
+            <label class="flex flex-col gap-1">
+              <span class="text-gray-600">Pausa tras revelar (s)</span>
+              <input type="number" min="1" max="10" x-model.number="autoDelayInput" class="border rounded-lg px-3 py-1.5 w-24">
+            </label>
+            <label class="flex flex-col gap-1">
+              <span class="text-gray-600">Tiempo máximo por foto (s)</span>
+              <input type="number" min="10" max="600" x-model.number="autoTimeoutInput" class="border rounded-lg px-3 py-1.5 w-24">
+            </label>
+            <button @click="saveAuto({ delay: autoDelayInput, timeout: autoTimeoutInput })"
+                    class="bg-indigo-600 text-white px-4 py-1.5 rounded-lg hover:bg-indigo-700">Guardar</button>
+            <span class="text-gray-600" x-text="autoMsg"></span>
+          </div>
+          <p class="text-xs text-gray-400 mt-2">El tiempo máximo es una red de seguridad: si no han votado todos, revela igualmente al agotarse.</p>
         </div>
 
         <!-- Temática visual + música -->
@@ -746,6 +792,28 @@
         musicUrl: null,
         musicPlaying: false,
         musicVolume: 0.3,
+        // Avance automático (lo decide el servidor; el cliente solo lo muestra)
+        autoMode: 'manual',
+        autoDelay: 3,
+        autoTimeout: 60,
+        autoPending: null,      // { action: 'reveal' | 'next', deadline: ms epoch (reloj local) }
+        autoDelayInput: 3,
+        autoTimeoutInput: 60,
+        autoMsg: '',
+        nowTick: Date.now(),
+        get autoSecondsLeft() {
+          return this.autoPending ? Math.max(0, Math.ceil((this.autoPending.deadline - this.nowTick) / 1000)) : null;
+        },
+        applyAuto(d) {
+          if (!d || !d.autoMode) return;
+          const settingsChanged = d.autoDelay !== this.autoDelay || d.autoTimeout !== this.autoTimeout;
+          this.autoMode = d.autoMode;
+          this.autoDelay = d.autoDelay;
+          this.autoTimeout = d.autoTimeout;
+          if (settingsChanged) { this.autoDelayInput = d.autoDelay; this.autoTimeoutInput = d.autoTimeout; }
+          this.autoPending = d.autoPending ? { action: d.autoPending.action, deadline: Date.now() + d.autoPending.inMs } : null;
+        },
+
         get themeEmojis() {
           return this.theme === 'halloween' ? ['🎃', '🦇', '🕸️'] : this.theme === 'navidad' ? ['🎄', '❄️', '✨'] : ['', '', ''];
         },
@@ -761,6 +829,8 @@
           if (this.view === 'player' && this.playerName) {
             this.playerJoined = true;
           }
+
+          setInterval(() => { if (this.autoPending) this.nowTick = Date.now(); }, 250);
 
           // Connect socket
           this.socket = io({ transports: ['websocket', 'polling'] });
@@ -801,6 +871,7 @@
             if (Array.isArray(data.authors)) this.authors = data.authors;
             if (data.theme) this.theme = data.theme;
             if ('musicUrl' in data) this.setMusicUrl(data.musicUrl);
+            this.applyAuto(data);
             if (data.state === 'revealed') {
               if (data.currentPhotoAuthorName) {
                 this.revealedAuthorName = data.currentPhotoAuthorName;
@@ -895,6 +966,7 @@
             this.players = data.players;
             this.ranking = [...data.players].sort((a, b) => b.score - a.score);
             this.gameUrl = data.session.game_url;
+            this.applyAuto(data);
             if (data.theme) this.theme = data.theme;
             if ('musicUrl' in data) this.setMusicUrl(data.musicUrl);
             this.gameUrlInput = data.session.game_url;
@@ -1132,6 +1204,18 @@
         },
 
         // --- Temática / música (TV) ---
+        async saveAuto(body) {
+          const res = await this.adminFetch('/api/admin/auto', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+          });
+          if (!res) return;
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok) { this.autoMsg = d.error || 'Error'; return; }
+          this.autoMsg = '✓ Guardado';
+          this.applyAuto(d);
+          setTimeout(() => { this.autoMsg = ''; }, 2000);
+        },
+
         async saveTheme(theme) {
           const res = await this.adminFetch('/api/admin/theme', {
             method: 'POST',
